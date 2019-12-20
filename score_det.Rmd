@@ -1,0 +1,173 @@
+---
+title: "Deterministic scoring"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(dplyr)
+library(tidyverse)
+library(plyr)
+library(easyVerification)
+library(verification)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(readr)
+
+no_core <- 6
+
+```
+
+
+                                              ## Gridded scores ##
+
+
+```{r setup, include=FALSE}
+#
+indic_period <- c("ET", "DRAIN") # issues working with other indicators
+
+tictoc::tic()
+
+acc_prev <- vector()
+msess <- vector()
+
+for (indicateur in indic_period){
+
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+
+  foreach(b=1:nboot, .packages=c('easyVerification', 's2dverification')) %dopar%  { # loop on bootstrap samples
+  #Spearman <- easyVerification:::EnsCorr
+    
+    nom_ref <- paste0(indicateur,b,"_ref.RData")
+    nom_prev <- paste0(indicateur,b,"_prev.RData")
+    nom_clim <- paste0(indicateur,b,"_clim.RData")
+    nom_an_prev <- paste0(indicateur,b,"_anomaly_prev.RData")
+    nom_an_clim <- paste0(indicateur,b,"_anomaly_clim.RData")
+    nom_an_obs <- paste0(indicateur,b,"_anomaly_obs.RData")
+    
+    load(file = file.path(dir_data, "extract", nom_ref))
+    load(file = file.path(dir_data, "extract", nom_prev))
+    load(file = file.path(dir_data, "extract", nom_clim))
+    load(file = file.path(dir_data, "extract", nom_an_prev))
+    load(file = file.path(dir_data, "extract", nom_an_clim))
+    load(file = file.path(dir_data, "extract", nom_an_obs))
+    
+    ngrids <- dim(array_obs)[1]
+    #ndimT <- dim(array_obs)[3]
+    
+    # ensemble mean 
+    prev_mean <- apply(array_prev[,,,9:20], c(1,2,4), mean)
+    clim_mean <- apply(array_clim[,,,9:20], c(1,2,4), mean)
+    
+
+                                            ### SEASONAL ###
+    
+    
+    # BE CAREFUL ON AGREGATION METHOD!!!!
+    det_seas <- array(NA, dim = c(ngrids,3))
+  
+    prev_seas <- apply(array_prev[,,,9:20], c(1,2,3), sum) #### aggregation method to be changed!!
+    clim_seas <- apply(array_clim[,,,9:20], c(1,2,3), sum)
+    ref_seas <- apply(array_obs[,,9:20], c(1,2), sum)
+    
+    prev_seas_mean <- apply(prev_seas, c(1,2), mean)
+    clim_seas_mean <- apply(clim_seas, c(1,2), mean)
+    
+    anoprev_seas <- apply(prev_anomaly, c(1,2,3), sum)
+    anoref_seas <- apply(obs_anomaly, c(1,2), sum)
+    
+      # MSESS
+      
+    msess <- veriApply("EnsMsess", fcst=t(prev_seas_mean), fcst.ref=t(clim_seas_mean), obs=t(ref_seas), parallel = TRUE)
+  
+      # ACC #
+    
+    acc_prev <- veriApply("EnsCorr", fcst=anoprev_seas, obs=anoref_seas)
+    det_seas <- array(c(msess, acc_prev), dim=c(ngrids,2))
+    
+    nom_prevseas <- paste0(indicateur, b,"scoredetseas_grid_prev.RData")
+  
+    save(det_seas, file = file.path(dir_data, "score", nom_prevseas))
+  
+
+}
+stopCluster(cl)
+
+}
+tictoc::toc() 
+
+```
+   
+   
+                                              ## Box scores ##
+
+
+We aggregate gridded deterministic scores with latitude weighting.
+
+```{r setup, include=FALSE}
+
+coeff <- vector()
+seas_ps <- matrix(ncol = 2, nrow = 6)
+
+for (indicateur in indic_period){
+  load(file = file.path(dir_data, "extract", paste0("lat_",indicateur,".RData")))
+  boot_month <- list()
+  boot_seas <- list()
+
+  for(b in 1:nboot)   {
+    # loading gridded scores
+  
+    # seasonal
+    nom_prevseas <- paste0(indicateur, b,"scoredetseas_grid_prev.RData")
+    load(file = file.path(dir_data, "score", nom_prevseas))
+    ngrids <- dim(det_seas)[1]
+
+    val_prevseas <- list()
+  
+    for (i in 1:ngrids){
+      val_prevseas[[i]] <- det_seas[i,]*cos(pi*lat[i]/180)
+      coeff[i] <- cos(pi*lat[i]/180)
+      # removing NAs
+      if (length(which(is.na(det_seas[i,])))>0){
+        coeff[i] <- NA
+        val_prevseas[[i]] <- rep(NA,2)
+      }
+    }
+  
+    boot_seas[[b]] <- apply(array(unlist(val_prevseas) , c(2,ngrids)), 1, sum, na.rm = T)/sum(coeff, na.rm = T)
+  }
+  
+    nom_bootseas <- paste0(indicateur, "seasdet_boot.csv")
+    save(boot_seas, file = file.path(dir_data, "score", nom_bootseas))
+    
+    seas_ps <- apply(array(unlist(boot_seas) , c(2,nboot)), 1, mean, na.rm=T)
+    nom_meanseas <- paste0(indicateur, "seasdet_box_prev.csv")
+    write_csv(as.data.frame(seas_ps), file.path(dir_data, "score", nom_meanseas))
+
+}
+
+```
+## Box score significance test
+
+Wilcoxon test with H0: MSESS non supérieure à 0 + ACC non supérieur à 0.3
+
+```{r}
+indicateur <- "ET"
+indicateur <- "DRAIN"
+
+   # season
+  nom_bootseas <- paste0(indicateur, "seasdet_boot.csv")
+  load(file = file.path(dir_data, "score", nom_bootseas))
+
+  boxboot <- array(unlist(boot_seas) , c(2,nboot))
+  
+  wilcox.test(boxboot[1,], mu = 0, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # msess
+  wilcox.test(boxboot[2,], mu = 0.3, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # acc
+
+
+```

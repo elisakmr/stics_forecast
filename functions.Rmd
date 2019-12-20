@@ -1,0 +1,71 @@
+---
+title: "Functions"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(dplyr)
+library(stats)
+
+```
+
+
+## ROC aggregated at box level
+
+# function computing scores for the box, weighting points as function of latitude
+
+```{r setup, include=FALSE}
+score_boite_prob = function(prev_prob, obs_bin, lati, nb_bin, e)
+{
+  # Calcul de HR et FAR pour scores ROC et diag de fiabilite sur des zones.
+  # Agregation des previsions probabilistes de chaque point,
+  # en applicant une ponderation.
+  # NB : les previsions sont exprimees en proba (entre 0. et 1.)  !!!!
+  # e= 1 > Higher tercile
+  # e= 2 > Lower tercile
+  # e= 3 > Higher quintile
+  # e= 4 > Lower quintile
+  
+  O=numeric(nb_bin)          # occurences bien prevues (hits)
+  NO=numeric(nb_bin)         # fausses alertes
+  HR=numeric(nb_bin)         # taux de bonnes previs agreges (pour ROC)
+  FAR=numeric(nb_bin)        # taux de fausses alertes (pour ROC)
+  HR_rel=numeric(nb_bin)     # taux bonnes previs par bin (pour diag fiabilite)
+  F_rel=numeric(nb_bin)      # freq des previs pour chaque bin (pour diag fiabilite)
+  # boucle sur les points de la zone
+  ngrids <- dim(obs_bin)[1]
+    
+  for (bin in (1:nb_bin)) {
+    for (i in ngrids){
+        vect_prev <- prev_prob[i,,e]
+        vect_obs <- obs_bin[i,,e]
+        O[bin] = O[bin] + cos(pi*lati[i]/180)*length(which(vect_prev>=((bin-1)/nb_bin) 
+                                                           & vect_prev<(bin/nb_bin) & vect_obs==1))
+        NO[bin] = NO[bin] + cos(pi*lati[i]/180)*length(which(vect_prev>=((bin-1)/nb_bin) 
+                                                             & vect_prev<(bin/nb_bin) & vect_obs==0))
+      
+    }
+  }
+  
+  # cumuls (pour ROC)
+  for (bin in (1:nb_bin)) {
+    # pour courbe ROC
+    HR[bin] = sum(O[bin:nb_bin])/sum(O[])
+    FAR[bin] = sum(NO[bin:nb_bin])/sum(NO[])
+  }
+  # taux par bin (pour diag de fiabilite)
+  HR_rel=O/(O+NO)
+  F_rel=(O+NO)/sum(O[]+NO[])
+  
+  # calcul AUC (cf http://stackoverflow.com/questions/4954507/calculate-the-area-under-a-curve-in-r)
+  AUC=-sum(diff(FAR) * (head(HR,-1)+tail(HR,-1)))/2
+  
+  liste_score = list(HR=HR,FAR=FAR, HR=HR, FAR=FAR, AUC=AUC)
+  return(liste_score)
+  
+}
+```
+

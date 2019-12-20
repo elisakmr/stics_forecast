@@ -1,0 +1,113 @@
+---
+title: "raster proba scores"
+output: html_document
+---
+
+```{r}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(maps)
+library(maptools)
+library(rasterVis)
+library(ggplot2)
+library(latticeExtra)
+library(sp)
+library(raster)
+library(rgdal)
+library(tmap)
+library(sf)
+library(ggmap)
+library(nnet)
+nboot <- 100
+
+```
+
+## Parameter setting 
+
+```{r}
+
+moi <- c("May","June","July","August","September","October","November")
+event <- 2
+nboot <- 50
+```
+
+
+                                                    ### NOT CROP SPECIFIC ###
+                                                    
+## SEASONNAL SCORE RASTER
+
+Building up rasters depicting probabilistic scores and statistical test outcomes
+
+```{r}
+indic_period <- c( "ET", "DRAIN") # issues working with other indicators
+
+for (indicateur in indic_period){
+  
+    load(file = file.path(dir_data, "extract", paste0("lat_",indicateur,".RData")))
+    load(file = file.path(dir_data, "extract", paste0("lon_",indicateur,".RData")))
+    ngrids <- length(lat)
+    score_ps <- array(NA, dim=c(ngrids, event, nboot)) 
+    
+    for (b in 1:nboot)  { 
+      
+      nom_prevseas <- paste0(indicateur, b,"scoreprobseason_grid_prev.RData")
+      load(file = file.path(dir_data, "score", nom_prevseas))
+  
+      score_ps[,1,b] <- scoreprob_seas_ps[,1] # low tercile
+      score_ps[,2,b] <- scoreprob_seas_ps[,2] # high tercile
+    
+    }
+ 
+    matrix4shp <- matrix(0, nrow = ngrids, ncol = 6) #col1: low tercile score; col2: low tercile score signifiance; col3: low tercile score; col4: low tercile score signifiance; col5: latitude; col6: longitude
+    
+    matrix4shp[,5] <- lat
+    matrix4shp[,6] <- lon
+    
+    ## creating a table containing mean skill and wilcoxon test outcome, with both coordinates (shape ready for shapefile conversion)
+    ras_prev_complete <- list()
+    
+      matrix4shp[,2] <- rep(0, ngrids)
+      matrix4shp[,4] <- rep(0, ngrids)
+      matrix4shp[,1] <- apply(score_ps[,1,], 1, mean, na.rm = TRUE) # summarizing skill scores for LT over bootstrap
+      matrix4shp[,3] <- apply(score_ps[,2,], 1, mean, na.rm = TRUE) # summarizing skill scores for HT over bootstrap
+  
+    for (i in 1:ngrids)  { 
+      if (length(which(is.na(score_ps[i,1,])))<1 | length(which(is.na(score_ps[i,2,])))<1){ # above that threshold indicator considered not assessed
+      wlt <- wilcox.test(score_ps[i,1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)
+      wht <- wilcox.test(score_ps[i,2,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)
+  
+        if (wlt$p.value < 0.05) {
+          matrix4shp[i,2] <- 1 
+        }
+      
+        if (wht$p.value < 0.05) {
+          matrix4shp[i,4] <- 1 
+        }
+      }
+      else {matrix4shp[i,1:4] <- rep(-1,4)} # setting -1 if indicator not assessed, row dropped when mapping
+  }
+  
+  # we load the dataframe previously built and transform it into a raster
+  
+  df_shp <- data.frame(matrix4shp)
+  colnames(df_shp) <- c("score_lt", "signifi_lt","score_ht", "signifi_ht","lat","lon")
+  coordinates(df_shp) <- ~lon+lat
+  proj4string(df_shp) <- CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+  shp_prob <- st_as_sf(df_shp)
+  ras_prev <- raster(shp_prob)
+  ext_prev <- extent(ras_prev)
+  mask.raster <- raster(resolution=c(0.1,0.072), crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0", ext = ext_prev)
+  ras_season <- rasterize(shp_prob, mask.raster)
+
+  title <- paste0(indicateur,"_seasonprob.tif")
+  writeRaster(ras_season, filename=file.path(dir_plot, "emmah_raster", title), overwrite = TRUE)
+} 
+
+layername <- names(ras_season)
+save(layername, file = file.path(dir_plot, "emmah_raster", "probseas_layname.RData"))
+
+```
+
+
+

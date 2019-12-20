@@ -1,0 +1,70 @@
+---
+title: "Probabilistic quintile transformation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(dplyr)
+library(stats)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(easyVerification)
+
+no_core <- 6
+e<-5
+nboot <- 100
+```
+
+## Transforming continuous arrays 
+
+Regarding 4 selected events (higher/lower tercile/quintile) reference continuous values are transformed into binary values; ensemble prevision values are transformed into probabilistic values (computed from the ensemble spread). 
+we have to do a trick to find out the first bootstrapped iteration and the run index whithin this iteration matching the year we are interested in (the random sampling doesn't respect chronology)
+
+
+```{r}
+tictoc::tic()
+
+load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+
+for (indicateur in indic_period){
+  
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+
+foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstrap samples
+
+  nom_ref <- paste0(indicateur,b,"_ref.RData")
+  load(file = file.path(dir_data, "extract", nom_ref))
+  nom_prev <- paste0(indicateur,b,"_prev.RData")
+  load(file = file.path(dir_data, "extract", nom_prev))
+  
+  ngrids <- dim(array_obs)[1]
+
+  ## SEASONAL ##
+    
+  int_obs <- apply(array_obs[,,9:20],c(1,2), mean) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
+  int_prev <- apply(array_prev[,,,9:20],c(1,2,3), mean)
+  seasbin_ref <- array (NA, dim=c(ngrids,nan,e))
+  seasprob_ps <- array (NA, dim=c(ngrids,nan,e))
+  
+  for (i in 1:ngrids){
+    seasbin_ref[i,,] <- count2prob(convert2prob(int_obs[i,], prob = 1:4/5), type = 4)
+    seasprob_ps[i,,] <- count2prob(convert2prob(int_prev[i,,], prob = 1:4/5), type = 4)
+  }
+    
+  nom_prevseas <- paste0(indicateur,b,"_seasquint_prev.RData")
+  nom_refseas <- paste0(indicateur,b,"_seasquint_obs.RData")
+    
+  save(seasprob_ps, file = file.path(dir_data, "extract", nom_prevseas))
+  save(seasbin_ref, file = file.path(dir_data, "extract", nom_refseas))
+} 
+ 
+  }
+
+tictoc::toc()
+```

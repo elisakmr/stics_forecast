@@ -1,0 +1,88 @@
+---
+title: "Mapping probabilistic scores"
+output: html_document
+---
+
+```{r}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(maps)
+library(maptools)
+library(rasterVis)
+library(ggplot2)
+library(latticeExtra)
+library(sp)
+library(raster)
+library(rgdal)
+library(tmap)
+library(sf)
+library(ggmap)
+library(mapview)
+library(grid)
+```
+## Parameter specifications
+
+Indicator to be displayed
+Region of interest
+
+```{r}
+
+indicateur <- "DRAIN"
+
+```
+## Loading raster
+
+Specific to indicator and year of prevision
+
+```{r}
+
+temp_ggplot <- c("#fee0d2", "#fc9272", "#de2d26")
+score_palette <- c("#d7191c","#f4a582","#ffffbf","#abd9e9","#2c7bb6")
+
+```
+
+
+                                                    ### SEASON MAPS ###
+
+
+
+```{r}
+
+title <- paste0(indicateur,"_seasonprob.tif")
+stack_seas <- stack(file.path(dir_plot, "emmah_raster", title)) # loading stack file
+
+load(file = file.path(dir_plot, "emmah_raster", "probseas_layname.RData")) # loading stack layer names before writeraster changed them
+names(stack_seas) <- c(layername)# re setting original layer names
+
+### BACKGROUND LOADED FROM GOOGLE
+ # key = "AIzaSyCD2-pP0yfM8aC8sjCB4g--CaCcExP6NhU"; "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA"
+ # register_google(key = "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA")
+ # back_map <- get_map(location = c(4, 43.1, 5.7, 44), maptype = "satellite", source = "google")
+
+  sp_roc <- rasterToPolygons(stack_seas[[4]]) 
+  names(sp_roc) <- "roc"
+  sp_roc$roc[which(sp_roc$roc==-1)] <- NA # to help plotting
+  shp_roc <- st_as_sf(sp_roc)
+
+  # shapefile of prevision confidence
+  sp_sign <- rasterToPoints(stack_seas[[5]], spatial = TRUE)
+  names(sp_sign) <- "significance"
+  sp_sign$significance[which(sp_sign$significance==0)] <- NA # to help plotting
+  sp_sign$significance[which(sp_sign$significance==-1)] <- NA # to help plotting
+  sf_test <- st_as_sf(sp_sign)
+  sf_nrm <- remove_missing(sf_test)
+
+  #shp_tercile$tercile <- as.factor(shp_tercile$tercile)
+  
+### OVERLAYING SHAPEFILE ON GOOGLE BACKGROUND MAP
+ggmap(back_map) + 
+  geom_sf(data = shp_roc, aes(fill = roc), inherit.aes = FALSE, alpha = 1)+
+  continuous_scale(aesthetics = "roc", scale_name = "manual", palette = 0.3)+
+  scale_fill_gradientn(colours=score_palette, limits = c(0,1))+ 
+  geom_sf(data = sf_nrm, aes(colour = significance), inherit.aes = FALSE, size = 0.02, show.legend = FALSE)+
+  labs(title = paste0(indicateur," season AUC "))+
+  theme(plot.title = element_text(size = 12, hjust = 0, vjust = 1.5))
+
+
+```
