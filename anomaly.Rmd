@@ -46,18 +46,20 @@ for (indicateur in indic_period){
 
     # CROSS VALIDATED ANOMALIES: we compute and save arrays of anomalies using cross validation scheme
     
-    prev_anomaly <- array(NA,dim=c(ngrids,nan,nrun,12))
-    obs_anomaly <- array(NA,dim=c(ngrids,nan,12))
-  
+    prev_anomaly <- array(NA,dim=c(ngrids,nan,nrun))
+    obs_anomaly <- array(NA,dim=c(ngrids,nan))
+    
+    prev_seas <- apply(array_prev[,,,9:20], c(1,2,3), sum) #### aggregation method to be changed!!
+    ref_seas <- apply(array_obs[,,9:20], c(1,2), sum)
+
     for (y in 1:nan){
-      cv_mean_prev <- apply(array_prev[,-y,,9:20], c(1,3,4), mean)
-      cv_mean_obs <- apply(array_obs[,-y,9:20], c(1,3), mean)
+      cv_mean_prev <- apply(prev_seas[,-y,], c(1,3), mean)
+      cv_mean_obs <- apply(ref_seas[,-y], 1, mean)
   
-      prev_anomaly[,y,,] <- array_prev[,y,,9:20]-cv_mean_prev
-      obs_anomaly[,y,] <- array_obs[,y,9:20]-cv_mean_obs
+      prev_anomaly[,y,] <- prev_seas[,y,]-cv_mean_prev
+      obs_anomaly[,y] <- ref_seas[,y]-cv_mean_obs
     
   }
-  
 
   nom_prev <- paste0(indicateur,b,"_anomaly_prev.RData")
   nom_obs <- paste0(indicateur,b,"_anomaly_obs.RData")

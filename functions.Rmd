@@ -38,18 +38,19 @@ score_boite_prob = function(prev_prob, obs_bin, lati, nb_bin, e)
   # boucle sur les points de la zone
   ngrids <- dim(obs_bin)[1]
     
-  for (bin in (1:nb_bin)) {
-    for (i in ngrids){
-        vect_prev <- prev_prob[i,,e]
-        vect_obs <- obs_bin[i,,e]
-        O[bin] = O[bin] + cos(pi*lati[i]/180)*length(which(vect_prev>=((bin-1)/nb_bin) 
-                                                           & vect_prev<(bin/nb_bin) & vect_obs==1))
-        NO[bin] = NO[bin] + cos(pi*lati[i]/180)*length(which(vect_prev>=((bin-1)/nb_bin) 
-                                                             & vect_prev<(bin/nb_bin) & vect_obs==0))
-      
-    }
-  }
+
+  for (i in (1:ngrids)) {
+    pred=prev_prob[i,,e]
+    obs=obs_bin[i,,e]
   
+    for (bin in (1:nb_bin-1)) {
+      O[bin] = O[bin] + cos(pi*lati[i]/180)*length(which(pred>=((bin-1)/nb_bin) & pred<(bin/nb_bin) & obs==1))
+      NO[bin] = NO[bin] + cos(pi*lati[i]/180)*length(which(pred>=((bin-1)/nb_bin) & pred<(bin/nb_bin) & obs==0))
+    }
+    O[nb_bin] = O[nb_bin] + cos(pi*lati[i]/180)*length(which(pred>=((nb_bin-1)/nb_bin) & pred<=1. & obs==1))
+    NO[nb_bin] = NO[nb_bin] + cos(pi*lati[i]/180)*length(which(pred>=((nb_bin-1)/nb_bin) & pred<=1. & obs==0))
+  }
+
   # cumuls (pour ROC)
   for (bin in (1:nb_bin)) {
     # pour courbe ROC

@@ -47,8 +47,8 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstra
 
   ## SEASONAL ##
     
-  int_obs <- apply(array_obs[,,9:20],c(1,2), mean) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
-  int_prev <- apply(array_prev[,,,9:20],c(1,2,3), mean)
+  int_obs <- apply(array_obs[,,9:20],c(1,2), sum) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
+  int_prev <- apply(array_prev[,,,9:20],c(1,2,3), sum)
   seasbin_ref <- array (NA, dim=c(ngrids,nan,e))
   seasprob_ps <- array (NA, dim=c(ngrids,nan,e))
   

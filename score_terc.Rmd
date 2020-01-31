@@ -1,5 +1,5 @@
 ---
-title: "Probabilistic scoring"
+title: "Probabilistic scoring regarding terciles"
 output: html_document
 ---
 
@@ -21,6 +21,7 @@ library(readr)
 library(purrr)
 
 no_core <- 6
+ev <-3 
 
 nboot <- 100
 indic_period <- c("ET", "DRAIN") # issues working with other indicators
@@ -39,7 +40,6 @@ Indicators are assessed on a 28 days time window and over the whole season
 
 
 tictoc::tic()
-e <- 2
 
 for (indicateur in indic_period){
   
@@ -57,26 +57,17 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstra
   ngrids <- dim(array_obs)[1]
   ndimT <- dim(array_obs)[3]
 
-  #scoreprob_q_ps <- array (NA, dim=c(ngrids,ndimT,e))
   scoreprob_seas_ps <- array (NA, dim=c(ngrids,e))
     
-    # Qinzaine scoring
-    
-  # for (t in 1:ndimT_period){
-  #   scoreprob_q_ps[,t,1] <- veriApply("EnsRoca", fcst=array_prev[,,,t], obs=array_obs[,,t], prob=1:2/3, parallel = TRUE)$cat1 
-  #   scoreprob_q_ps[,t,2] <- veriApply("EnsRoca", fcst=array_prev[,,,t], obs=array_obs[,,t], prob=1:2/3, parallel = TRUE)$cat3 
-  # }
-    
+
   # seasonal: WARNING WITH AGREGATION METHOD!!!!
   seas_obs <- apply(array_obs[,,9:20],c(1,2), sum)
   seas_prev <- apply(array_prev[,,,9:20],c(1,2,3), sum)
   scoreprob_seas_ps[,1] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=1:2/3, parallel = TRUE)$cat1 
   scoreprob_seas_ps[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=1:2/3, parallel = TRUE)$cat3 
    
-  #nom_prevmont <- paste0(indicateur, b,"scoreprobqz_grid_prev.RData")
-  nom_prevseas <- paste0(indicateur, b,"scoreprobseason_grid_prev.RData")
+  nom_prevseas <- paste0(indicateur, b,"scoretercseason_grid_prev.RData")
 
-  #save(scoreprob_q_ps, file = file.path(dir_data, "score", nom_prevmont))
   save(scoreprob_seas_ps, file = file.path(dir_data, "score", nom_prevseas))
 
   }
@@ -109,8 +100,8 @@ for (indicateur in indic_period){
 
   for (b in 1:nboot){
     
-    nom_prevseas <- paste0(indicateur,b,"_seasprob_prev.RData")
-    nom_refseas <- paste0(indicateur,b,"_seasbin_obs.RData")
+    nom_prevseas <- paste0(indicateur,b,"_seasterc_prev.RData")
+    nom_refseas <- paste0(indicateur,b,"_seasterc_obs.RData")
     load(file = file.path(dir_data, "extract", nom_prevseas))
     load(file = file.path(dir_data, "extract", nom_refseas))
     vect_event2 <- vector()
@@ -124,7 +115,7 @@ for (indicateur in indic_period){
   
   }
  
-  nom_seas <- paste0(indicateur,"boxprob_seas.RData")
+  nom_seas <- paste0(indicateur,"boxterc_seas.RData")
   save(list_boot2, file = file.path(dir_data, "score", nom_seas))
 
 }
@@ -143,12 +134,12 @@ Transform lists in a more handy format
 for (indicateur in indic_period){
   
    # season
-  nom_ps <- paste0(indicateur,"boxprob_seas.RData")
+  nom_ps <- paste0(indicateur,"boxterc_seas.RData")
   load(file = file.path(dir_data, "score", nom_ps))
   
-  sum_seas <- apply(array(unlist(list_boot2) , c(3,nboot)), 1, mean, na.rm = T)
+  sum_seas <- apply(array(unlist(list_boot2) , c(ev,nboot)), 1, mean, na.rm = T)
   
-  nom_seas <- paste0(indicateur,"avboxprob_seas.csv")
+  nom_seas <- paste0(indicateur,"avboxterc_seas.csv")
   write_csv(as.data.frame(sum_seas), file.path(dir_data, "score", nom_seas))
   
 }
@@ -163,10 +154,10 @@ indicateur <- "ET"
 indicateur <- "DRAIN"
 
    # season
-  nom_seas <- paste0(indicateur,"boxprob_seas.RData")
+  nom_seas <- paste0(indicateur,"boxterc_seas.RData")
   load(file = file.path(dir_data, "score", nom_seas))
   
-  boxboot <- array(unlist(list_boot2) , c(event,nboot))
+  boxboot <- array(unlist(list_boot2) , c(ev,nboot))
   
    wilcox.test(boxboot[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
    wilcox.test(boxboot[2,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value

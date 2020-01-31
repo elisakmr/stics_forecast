@@ -44,7 +44,7 @@ ind_eng <- c("Rain – evaporation", "Accumulated rainfall","Number of rainy day
 
 ```{r}
 
-indicateur <- "DRAIN"
+indicateur <- "ET"
 title <- paste0(indicateur,"_detseas",".tif")
 stacky_seas <- stack(file.path(dir_plot, "emmah_raster", title)) # loading stack file
 
@@ -52,8 +52,8 @@ load(file = file.path(dir_plot, "season_raster", "layname_detseas.RData")) # loa
 names(stacky_seas) <- c(layername)# re setting original layer names
 
 score_palette <- c("#ca0020","#f4a582","#f7f7f7","#92c5de","#0571b0")
-drain <- c(-0.0016, 0.0016)
-etp <- c(-0.006, 0.006)
+drain <- c(-0.3, 0.3)
+etp <- c(-1.9, 1.9)
 ```
 
 ### SEASON MAPS ###
@@ -85,7 +85,7 @@ etp <- c(-0.006, 0.006)
 ggmap(back_map) +
   geom_sf(data = shp_msess, aes(fill = msess), inherit.aes = FALSE, alpha = 1)+
   continuous_scale(aesthetics = "msess", scale_name = "manual", palette = 0.1)+
-  scale_fill_gradientn(colours=score_palette, limits = drain)+  #
+  scale_fill_gradientn(colours=score_palette, limits = etp)+  #
   geom_sf(data = sf_nrm, aes(colour = significance), inherit.aes = FALSE, size = 0.02, show.legend = FALSE)+
   labs(title = paste0(indicateur," season MSESS "))+
   theme(plot.title = element_text(size = 12, hjust = 0, vjust = 1.5))

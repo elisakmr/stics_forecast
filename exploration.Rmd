@@ -59,9 +59,9 @@ Attention sum ou mean selon indicateur!
 
 ```{r }
 
-ps_season_int <- apply(ps_original, c(1,2,3), sum)
+ps_season_int <- apply(ps_original[,,,9:20], c(1,2,3), sum)
 ps_season <- apply(ps_season_int, 2, mean)
-ref_season_int <- apply(ref_original, c(1,2), sum)
+ref_season_int <- apply(ref_original[,,9:20], c(1,2), sum)
 ref_season <- apply(ref_season_int, 2, mean)
 
 df_raw <- data.frame()
@@ -79,5 +79,28 @@ ggplot(df_raw, aes(x=year, y=value,  fill=type)) + geom_bar(stat = "identity", p
 
 # calculating mean differences
 df_raw %>% group_by(type) %>% summarise(mean_ps=mean(value))
+
+```
+## Plotting seasonal prevision and observation
+
+Attention sum ou mean selon indicateur!
+
+```{r }
+  ## parameters ##
+y <- 1
+
+  ## plot ## 
+
+ps_season_int <- apply(ps_original, c(1,2,3), sum)
+ps_season <- apply(ps_season_int, c(1,2), mean)
+ref_season_int <- apply(ref_original, c(1,2), sum)
+ref_season <- apply(ref_season_int, c(1,2), mean)
+tercile_bound <- as.numeric(quantile(ref_season, prob = 1:2/3))
+
+test_df <- as.data.frame(cbind(ps_season[,y],ref_season[,y]))
+colnames(test_df) <- c("prevision","ref")
+PlotForecastPDF(test_df,tercile_bound, add.ensmemb = 'no', var.name = paste0(indicateur,"(mm)"),title = paste0(indicateur," year ", an[y]))
+
+
 
 ```

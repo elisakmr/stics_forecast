@@ -1,0 +1,158 @@
+---
+title: "Taylor diagram"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(plotrix)
+library(maps)
+library(maptools)
+library(rasterVis)
+library(ggplot2)
+library(latticeExtra)
+library(sp)
+library(raster)
+library(rgdal)
+library(tmap)
+library(sf)
+library(ggmap)
+library(nnet)
+library(maps)
+library(maptools)
+library(tmaptools)
+library(rasterVis)
+library(ggplot2)
+library(latticeExtra)
+library(sp)
+library(raster)
+library(rgdal)
+library(tmap)
+library(sf)
+library(ggmap)
+library(mapview)
+library(grid)
+library(ggpubr)
+library(rgeos)
+```
+
+## Retrieving original data set
+
+we have to do a trick to find out the first bootstrapped iteration and the run index whithin this iteration matching the year we are interested in (the random sampling doesn't respect chronology)
+
+```{r }
+indicateur <- "DRAIN"
+load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+
+nom_ref <- paste0(indicateur,1,"_ref.RData")
+load(file = file.path(dir_data, "extract", nom_ref))
+ngrids <- dim(array_obs)[1]
+
+ps_original <- array(NA, dim=c(ngrids, nan, nrun, ndimT))
+ref_original <- array(NA, dim=c(ngrids, nan, ndimT))
+
+ for (year in an){
+ y <- which(an==year)
+       # bootstrap iteration index of the year selected
+     
+    list_match <- lapply(rand_year, function(x) which(year == x)) # list of matchs between list of years randomly generated for the bootstrap and the year we are interested in
+     
+     y_index <- list_match[[1]] # year index within the bootstrap iteration
+     b_index <- 1 # bootstrap iteration index
+     for (b in 1:(nboot-1)){ # pick the first iteration and first index matching the year we are looking for
+       if (length(list_match[[b]])<1 & length(y_index)<1) {y_index <- list_match[[b+1]]; b_index <- b+1}
+       else {y_index <- y_index; b_index <- b_index}
+     }
+     
+  nom_prev <- paste0(indicateur,b_index,"_prev.RData")
+  load(file = file.path(dir_data, "extract", nom_prev))
+  ps_original[,y,,] <- array_prev[,y_index[1],,]
+  
+  nom_ref <- paste0(indicateur,b_index,"_ref.RData")
+  load(file = file.path(dir_data, "extract", nom_ref))
+  ref_original[,y,] <- array_obs[,y_index[1],]
+}
+
+
+ps_season_int <- apply(ps_original, c(1,2,3), sum)
+ps_season <- apply(ps_season_int, c(1,2), mean)
+ref_season <- apply(ref_original, c(1,2), sum)
+
+
+taylor.diagram(ref=ref_season_int[1,], model=ps_season[1,],pos.cor=FALSE)
+taylor.diagram(ref=ref_season_int[30,], model=ps_season[30,], add=TRUE, col= "blue")
+
+```
+## Raster of assessed grids
+
+we have to do a trick to find out the first bootstrapped iteration and the run index whithin this iteration matching the year we are interested in (the random sampling doesn't respect chronology)
+
+```{r }
+
+
+    load(file = file.path(dir_data, "extract", paste0("lat_",indicateur,".RData")))
+    load(file = file.path(dir_data, "extract", paste0("lon_",indicateur,".RData")))
+    ngrids <- length(lat)
+
+    matrix4shp <- matrix(0, nrow = ngrids, ncol = 3) #col1: low tercile score; col2: low tercile score signifiance; col3: low tercile score; col4: low tercile score signifiance; col5: latitude; col6: longitude
+    matrix4shp[1,1] <- 1
+    matrix4shp[4,1] <- 1
+    matrix4shp[,2] <- lat
+    matrix4shp[,3] <- lon
+    
+  df_shp <- data.frame(matrix4shp)
+  colnames(df_shp) <- c("selectgrid", "lat","lon")
+  coordinates(df_shp) <- ~lon+lat
+  proj4string(df_shp) <- CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+  shp_prob <- st_as_sf(df_shp)
+  ras_prev <- raster(shp_prob)
+  ext_prev <- extent(ras_prev)
+  mask.raster <- raster(resolution=c(0.1,0.072), crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0", ext = ext_prev) #resolution=c(0.1,0.072), 
+  ras_taylor <- rasterize(shp_prob, mask.raster)
+
+  title <- paste0(indicateur,"_taylorgrid.tif")
+  writeRaster(ras_taylor, filename=file.path(dir_plot, "emmah_raster", title), overwrite = TRUE)
+
+coordinates(df_shp) <- ~lon+lat
+gridded(df_shp) <- TRUE
+# coerce to raster
+rasterDF <- raster(df_shp)
+rasterDF
+
+rasterFromXYZ(df_shp)
+
+```
+
+## Map of assessed grids
+
+we have to do a trick to find out the first bootstrapped iteration and the run index whithin this iteration matching the year we are interested in (the random sampling doesn't respect chronology)
+
+```{r }
+
+  title <- paste0(indicateur,"_taylorgrid.tif")
+stacky_seas <- stack(file.path(dir_plot, "emmah_raster", title)) # loading stack file
+
+  sp_grid <- rasterToPolygons(stacky_seas[[2]]) 
+  names(sp_grid) <- "grid"
+  #sp_grid$grid[which(sp_grid$grid==0)] <- NA # to help plotting
+  shp_grid <- st_as_sf(sp_grid)
+  #shp_gridnm <- remove_missing(shp_grid)
+
+
+  #shp_tercile$tercile <- as.factor(shp_tercile$tercile)
+### OVERLAYING SHAPEFILE ON GOOGLE BACKGROUND MAP
+ggmap(back_map) +
+  geom_sf(data = shp_grid, aes(fill = grid))+
+  continuous_scale(aesthetics = "DRAIN_taylorgrid.2", scale_name = "manual", palette = 0.1)+
+  scale_fill_gradientn(colours=score_palette, limits = etp)+labs(title = paste0(indicateur," season MSESS "))+
+  theme(plot.title = element_text(size = 12, hjust = 0, vjust = 1.5))
+
+ggmap(back_map) +
+  geom_sf(data = shp_prob, aes(fill = selectgrid))+
+  continuous_scale(aesthetics = "selectgrid", scale_name = "manual", palette = 0.1)+
+  scale_fill_gradientn(colours=score_palette, limits = etp)+labs(title = paste0(indicateur," season MSESS "))+
+  theme(plot.title = element_text(size = 12, hjust = 0, vjust = 1.5))
+
+```

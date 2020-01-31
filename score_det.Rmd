@@ -22,17 +22,22 @@ no_core <- 6
 
 ```
 
+                                            ### NOT CROP SPECIFIC ###
+                                            
+                                            
+## Gridded scores
 
-                                              ## Gridded scores ##
+Scores computed for each grid separately.
+Indicators are assessed on a 28 days time window and over the whole season
+
+```{r}
 
 
-```{r setup, include=FALSE}
-#
 indic_period <- c("ET", "DRAIN") # issues working with other indicators
 
 tictoc::tic()
 
-acc_prev <- vector()
+acc <- vector()
 msess <- vector()
 
 for (indicateur in indic_period){
@@ -75,20 +80,13 @@ for (indicateur in indic_period){
     clim_seas <- apply(array_clim[,,,9:20], c(1,2,3), sum)
     ref_seas <- apply(array_obs[,,9:20], c(1,2), sum)
     
-    prev_seas_mean <- apply(prev_seas, c(1,2), mean)
-    clim_seas_mean <- apply(clim_seas, c(1,2), mean)
+    # prev_seas_mean <- apply(prev_seas, c(1,2), mean)
+    # clim_seas_mean <- apply(clim_seas, c(1,2), mean)
     
-    anoprev_seas <- apply(prev_anomaly, c(1,2,3), sum)
-    anoref_seas <- apply(obs_anomaly, c(1,2), sum)
-    
-      # MSESS
-      
-    msess <- veriApply("EnsMsess", fcst=t(prev_seas_mean), fcst.ref=t(clim_seas_mean), obs=t(ref_seas), parallel = TRUE)
-  
-      # ACC #
-    
-    acc_prev <- veriApply("EnsCorr", fcst=anoprev_seas, obs=anoref_seas)
-    det_seas <- array(c(msess, acc_prev), dim=c(ngrids,2))
+      # MSESS & ACC
+    msess <- veriApply("EnsMsess", fcst=prev_seas, fcst.ref=clim_seas, obs=ref_seas, parallel = TRUE)
+    acc <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly)
+    det_seas <- array(c(msess, acc), dim=c(ngrids,2))
     
     nom_prevseas <- paste0(indicateur, b,"scoredetseas_grid_prev.RData")
   
@@ -101,15 +99,18 @@ stopCluster(cl)
 }
 tictoc::toc() 
 
+
+
 ```
-   
-   
+
+  
+
                                               ## Box scores ##
 
 
 We aggregate gridded deterministic scores with latitude weighting.
 
-```{r setup, include=FALSE}
+```{r }
 
 coeff <- vector()
 seas_ps <- matrix(ncol = 2, nrow = 6)
@@ -156,7 +157,7 @@ for (indicateur in indic_period){
 
 Wilcoxon test with H0: MSESS non supérieure à 0 + ACC non supérieur à 0.3
 
-```{r}
+```{r }
 indicateur <- "ET"
 indicateur <- "DRAIN"
 
