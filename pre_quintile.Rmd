@@ -4,7 +4,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
 dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(dplyr)
@@ -18,6 +18,8 @@ library(easyVerification)
 no_core <- 6
 e<-5
 nboot <- 100
+quinzn <- 9:20 # selected quinzaines de [9;20]
+indicatOrs <- c("grassyieldC1C2_", "bilanhydr")
 ```
 
 ## Transforming continuous arrays 
@@ -31,7 +33,7 @@ tictoc::tic()
 
 load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
 
-for (indicateur in indic_period){
+for (indicateur in indicatOrs){
   
   cl <- makeCluster(no_core)
   registerDoParallel(cl)
@@ -46,9 +48,11 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstra
   ngrids <- dim(array_obs)[1]
 
   ## SEASONAL ##
-    
-  int_obs <- apply(array_obs[,,9:20],c(1,2), mean) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
-  int_prev <- apply(array_prev[,,,9:20],c(1,2,3), mean)
+  if (indicateur=="bilanhydr"){
+  int_obs <- apply(array_obs[,,quinzn],c(1,2), sum) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
+  int_prev <- apply(array_prev[,,,quinzn],c(1,2,3), sum)
+  } else { int_obs <- array_obs; int_prev <- array_prev}
+  
   seasbin_ref <- array (NA, dim=c(ngrids,nan,e))
   seasprob_ps <- array (NA, dim=c(ngrids,nan,e))
   

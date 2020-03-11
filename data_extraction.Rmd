@@ -4,7 +4,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE, echo=FALSE}
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
 dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(plyr)
@@ -63,37 +63,38 @@ ndimT_period <- length(dimT_period)
 
 ```
 
-## Extracting annual indicator values = CEREAL YIELDS
+## Indicator with specific temporality
 
 For each indicator, values are stored in 3 multi-dimensional arrays: one per climat type (reference, prevision, climatology)
 Reference array has 3 dimension: grid+year+t
 Prevision/climatology arrays have 4 dimensions: grid+year+run+t
-Grass: t= year,c1,c2,c3
-All other cereals: t= year
+Grass: t= c1,c2
 
 ```{r, echo=FALSE}
 
-# generate random year series
-# rand_year <- list()
-# for (b in 1:nboot){
-#    rand_year[[b]] <- sample(1:nan, nan, replace = TRUE) 
-#  }
-#  save(rand_year, file = file.path(dir_data, "extract", "years.RData"))
+indicateur <- "grassyield"
+coupe <- c("C1", "C2")
 
-# array setting x*year(*run)*t
 load(file = file.path(dir_data, "extract", "years.RData"))
 
 tictoc::tic() 
 
-                                           ####################### ANNUAL #######################
+inter <- data_an %>% 
+        filter(occupsol == "GRASS")
+lat <- unique(inter[,"lat"]) 
+save(lat, file = file.path(dir_data, "extract", paste0("lat_",indicateur,".RData")))
+lon <- unique(inter[,"lon"]) 
+save(lon, file = file.path(dir_data, "extract", paste0("lon_",indicateur,".RData")))
 
-for (culture in cult_an){
 
-   # culture type filtering
+for (t in coupe){
+
+   # culture type and cut filtering
       cult_data <- data_an %>% 
-        filter(occupsol == culture)
+        filter(occupsol == "GRASS", period == t)
       
       ngrids_cult <- length(unique(cult_data[,"cellnum"]))
+      
         # climat type filtering
       obs_data <- cult_data %>% 
         filter(climattype == "REF") 
@@ -104,47 +105,38 @@ for (culture in cult_an){
       clim_data <- cult_data %>% 
         filter(climattype == "CLIMATO") 
       
-  ifelse (culture == "GRASS", tempo<-4, tempo<-1) # temporal dimension depends on culture type
-  coupe <- unique(data_an[,"period"])
-  
   # extracting data
   cl <- makeCluster(no_core)
   registerDoParallel(cl)
   
   foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # loop on bootstrap samples
-    array_obs <- array(NA, dim=c(ngrids_cult, nan, tempo))
-    array_prev <- array(NA, dim=c(ngrids_cult, nan, nrun, tempo))
-    array_clim <- array(NA, dim=c(ngrids_cult, nan, nrun, tempo))
+    array_obs <- array(NA, dim=c(ngrids_cult, nan))
+    array_prev <- array(NA, dim=c(ngrids_cult, nan, nrun))
+    array_clim <- array(NA, dim=c(ngrids_cult, nan, nrun))
   
       for (j in 1:nan){
         y <- rand_year[[b]][j]
         
         obs_int <- obs_data %>% 
         filter(year_ == y) 
-        prev_int1 <- prev_data %>% 
+        prev_int <- prev_data %>% 
         filter(year_ == y) 
-        clim_int1 <- clim_data %>% 
+        clim_int <- clim_data %>% 
         filter(year_ == y) 
         
-        for (t in tempo){
-          array_obs[,j,t] <- as.vector(unlist(obs_int %>% filter(period == coupe[t]) %>% select(indicatorvalue)))
+        array_obs[,j] <- as.vector(unlist(obs_int %>%  select(indicatorvalue)))
           
-          prev_int2 <- prev_int1 %>% 
-          filter(period == coupe[t]) 
-          clim_int2 <- clim_int1 %>% 
-          filter(period == coupe[t]) 
-   
-          for (r in 1:nrun){
+        for (r in 1:nrun){
           # indicator value extracting
-          array_prev[,j,r,t] <- as.vector(unlist(prev_int2 %>% filter(climatscenario == r) %>% select(indicatorvalue)))
-          array_clim[,j,r,t] <- as.vector(unlist(clim_int2 %>% filter(climatscenario == r) %>% select(indicatorvalue)))
-          }
+          array_prev[,j,r] <- as.vector(unlist(prev_int %>% filter(climatscenario == r) %>% select(indicatorvalue)))
+          array_clim[,j,r] <- as.vector(unlist(clim_int %>% filter(climatscenario == r) %>% select(indicatorvalue)))
         }
+        
       }
     
-      nom_ref <- paste0("yield_",culture,b,"_ref.RData")
-      nom_prev <- paste0("yield_",culture,b,"_prev.RData")
-      nom_clim <- paste0("yield_",culture,b,"_clim.RData")
+      nom_ref <- paste0(indicateur,t,"_",b,"_ref.RData")
+      nom_prev <- paste0(indicateur,t,"_",b,"_prev.RData")
+      nom_clim <- paste0(indicateur,t,"_",b,"_clim.RData")
       
       save(array_obs, file = file.path(dir_data, "extract", nom_ref))
       save(array_prev, file = file.path(dir_data, "extract", nom_prev))
@@ -154,6 +146,7 @@ for (culture in cult_an){
 stopCluster(cl)
 
 tictoc::toc()
+
 
 ```
 
@@ -165,8 +158,7 @@ Prevision/climatology arrays have 4 dimensions: grid+year+run+t
 t= Q1...Q24
 
 ```{r, echo=FALSE}
-indic_period <- c("DRAIN", "ET") # issues working with other indicators
-
+indic_period <- c("IRRIG", "PREVNAP") # issues working with other indicators
 # generate random year series
 # rand_year <- list()
 # for (b in 1:nboot){
@@ -174,7 +166,6 @@ indic_period <- c("DRAIN", "ET") # issues working with other indicators
 #  }
 #  save(rand_year, file = file.path(dir_data, "extract", "years.RData"))
 
-# array setting x*year(*run)*t
 load(file = file.path(dir_data, "extract", "years.RData"))
 
 tictoc::tic() 
@@ -184,9 +175,15 @@ tictoc::tic()
 for (indicateur in indic_period){
 
    # indicator filtering
+  if (indicateur=="IRRIG"){
+      ind_data <- data_period %>% 
+        filter(indicator == indicateur, occupsol == "OLIVE-FRUIT")
+  }
+  else if (indicateur=="PREVNAP"){
       ind_data <- data_period %>% 
         filter(indicator == indicateur)
-      
+  }
+
       ngrids_ind <- length(unique(ind_data[,"cellnum"]))
       
       lat <- unique(ind_data[,"lat"]) 

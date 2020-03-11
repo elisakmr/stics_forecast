@@ -4,7 +4,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
 dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(easyVerification)
@@ -23,11 +23,12 @@ library(purrr)
 no_core <- 6
 ev <- 5
 nboot <- 100
-indic_period <- c("ET", "DRAIN") # issues working with other indicators
+indicatOrs <- c("grassyieldC1C2_", "bilanhydr")
+quinzn <- 9:20 # selected quinzaines de [9;20]
 
 ```
 
-                                            ### NOT CROP SPECIFIC ###
+                                            ### GRID ###
                                             
                                             
 ## Gridded scores
@@ -37,10 +38,9 @@ Indicators are assessed on a 28 days time window and over the whole season
 
 ```{r}
 
-
 tictoc::tic()
 
-for (indicateur in indic_period){
+for (indicateur in indicatOrs){
   
   cl <- makeCluster(no_core)
   registerDoParallel(cl)
@@ -59,8 +59,12 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstra
   scoreprob_seas_ps <- array (NA, dim=c(ngrids,e))
     
   # seasonal: WARNING WITH AGREGATION METHOD!!!!
-  seas_obs <- apply(array_obs[,,9:20],c(1,2), sum)
-  seas_prev <- apply(array_prev[,,,9:20],c(1,2,3), sum)
+  if (indicateur=="bilanhydr"){
+  seas_obs <- apply(array_obs[,,quinzn],c(1,2), sum)
+  seas_prev <- apply(array_prev[,,,quinzn],c(1,2,3), sum)
+  }
+  else {seas_obs <- array_obs; seas_prev <- array_prev}
+  
   scoreprob_seas_ps[,1] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=1:4/5, parallel = TRUE)$cat1 
   scoreprob_seas_ps[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=1:4/5, parallel = TRUE)$cat5 
    
@@ -80,7 +84,7 @@ tictoc::toc()
 
 ```
 
-                                             ### NOT CROP SPECIFIC ###
+                                             ### BOX ###
     
     
 ## Box-agregated scores
@@ -91,7 +95,7 @@ Aggregation computed using latitude weighting
 
 tictoc::tic()
 
-for (indicateur in indic_period){
+for (indicateur in indicatOrs){
 
   list_boot2 <- list()
   
@@ -107,7 +111,7 @@ for (indicateur in indic_period){
     vect_event2 <- vector()
     for (e in 1:5){ #LT,MT,HT
       
-      vect_event2[e] <- score_boite_prob(seasprob_ps, seasbin_ref, lat, nb_bin = 5, e)$AUC # seasonal 
+      vect_event2[e] <- score_boite_prob(seasprob_ps, seasbin_ref, lat, nb_bin = 10, e)$AUC # seasonal 
   
       }
  
@@ -131,7 +135,7 @@ Transform lists in a more handy format
 
 ```{r}
 
-for (indicateur in indic_period){
+for (indicateur in indicatOrs){
   
    # season
   nom_ps <- paste0(indicateur,"boxquint_seas.RData")
@@ -150,7 +154,7 @@ for (indicateur in indic_period){
 Wilcoxon test with H0: AUC non supérieure à 0.5
 
 ```{r}
-indicateur <- "ET"
+indicateur <- "bilanhydr"
 indicateur <- "DRAIN"
 
    # season

@@ -4,7 +4,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
 dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(dplyr)
@@ -19,10 +19,10 @@ library(doParallel)
 library(readr)
 
 no_core <- 6
-
+quinzn <- 9:20 # selected quinzaines de [9;20]
 ```
 
-                                            ### NOT CROP SPECIFIC ###
+                                            ### GRIDDED ###
                                             
                                             
 ## Gridded scores
@@ -32,15 +32,14 @@ Indicators are assessed on a 28 days time window and over the whole season
 
 ```{r}
 
-
-indic_period <- c("ET", "DRAIN") # issues working with other indicators
+indicatOrs <- c("grassyieldC1C2_", "bilanhydr")
 
 tictoc::tic()
 
 acc <- vector()
 msess <- vector()
 
-for (indicateur in indic_period){
+for (indicateur in indicatOrs){
 
   cl <- makeCluster(no_core)
   registerDoParallel(cl)
@@ -52,22 +51,16 @@ for (indicateur in indic_period){
     nom_prev <- paste0(indicateur,b,"_prev.RData")
     nom_clim <- paste0(indicateur,b,"_clim.RData")
     nom_an_prev <- paste0(indicateur,b,"_anomaly_prev.RData")
-    nom_an_clim <- paste0(indicateur,b,"_anomaly_clim.RData")
     nom_an_obs <- paste0(indicateur,b,"_anomaly_obs.RData")
     
     load(file = file.path(dir_data, "extract", nom_ref))
     load(file = file.path(dir_data, "extract", nom_prev))
     load(file = file.path(dir_data, "extract", nom_clim))
     load(file = file.path(dir_data, "extract", nom_an_prev))
-    load(file = file.path(dir_data, "extract", nom_an_clim))
     load(file = file.path(dir_data, "extract", nom_an_obs))
     
     ngrids <- dim(array_obs)[1]
     #ndimT <- dim(array_obs)[3]
-    
-    # ensemble mean 
-    prev_mean <- apply(array_prev[,,,9:20], c(1,2,4), mean)
-    clim_mean <- apply(array_clim[,,,9:20], c(1,2,4), mean)
     
 
                                             ### SEASONAL ###
@@ -75,17 +68,17 @@ for (indicateur in indic_period){
     
     # BE CAREFUL ON AGREGATION METHOD!!!!
     det_seas <- array(NA, dim = c(ngrids,3))
-  
-    prev_seas <- apply(array_prev[,,,9:20], c(1,2,3), sum) #### aggregation method to be changed!!
-    clim_seas <- apply(array_clim[,,,9:20], c(1,2,3), sum)
-    ref_seas <- apply(array_obs[,,9:20], c(1,2), sum)
+  if (indicateur=="bilanhydr"){
+    prev_seas <- apply(array_prev[,,,quinzn], c(1,2,3), sum) #### aggregation method to be changed!!
+    clim_seas <- apply(array_clim[,,,quinzn], c(1,2,3), sum)
+    ref_seas <- apply(array_obs[,,quinzn], c(1,2), sum)
+  }
+    else { prev_seas <- array_prev; clim_seas <- array_clim; ref_seas <- array_obs}
     
-    # prev_seas_mean <- apply(prev_seas, c(1,2), mean)
-    # clim_seas_mean <- apply(clim_seas, c(1,2), mean)
-    
+   
       # MSESS & ACC
     msess <- veriApply("EnsMsess", fcst=prev_seas, fcst.ref=clim_seas, obs=ref_seas, parallel = TRUE)
-    acc <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly)
+    acc <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly, parallel = TRUE)
     det_seas <- array(c(msess, acc), dim=c(ngrids,2))
     
     nom_prevseas <- paste0(indicateur, b,"scoredetseas_grid_prev.RData")
@@ -104,18 +97,21 @@ tictoc::toc()
 ```
 
   
+                                            ### BOX SCORES ###
+                                            
+                                            
+## Aggregated scores
 
-                                              ## Box scores ##
+Scores computed for each grid separately.
+Indicators are assessed on a 28 days time window and over the whole season
 
-
-We aggregate gridded deterministic scores with latitude weighting.
-
-```{r }
+```{r}
+indicatOrs <- c("grassyieldC1C2_", "bilanhydr")
 
 coeff <- vector()
 seas_ps <- matrix(ncol = 2, nrow = 6)
 
-for (indicateur in indic_period){
+for (indicateur in indicatOrs){
   load(file = file.path(dir_data, "extract", paste0("lat_",indicateur,".RData")))
   boot_month <- list()
   boot_seas <- list()
@@ -153,11 +149,13 @@ for (indicateur in indic_period){
 }
 
 ```
+
+
 ## Box score significance test
 
 Wilcoxon test with H0: MSESS non supérieure à 0 + ACC non supérieur à 0.3
 
-```{r }
+```{r}
 indicateur <- "ET"
 indicateur <- "DRAIN"
 

@@ -1,0 +1,168 @@
+---
+title: "agregation"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+no_core <- 6
+nboot <- 100
+```
+## Grass yield
+
+Agregation method sum 1st and 2nd cut grass yield 
+
+```{r, echo=FALSE}
+
+indicateur <- "grassyield"
+load(file = file.path(dir_data, "extract", "lat_grassyield.RData"))
+save(lat, file = file.path(dir_data, "extract", "lat_grassyieldC1C2_.RData"))
+load(file = file.path(dir_data, "extract", "lon_grassyield.RData"))
+save(lat, file = file.path(dir_data, "extract", "lon_grassyieldC1C2_.RData"))
+
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+  tictoc::tic()
+  foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # loop on bootstrap samples
+  
+    nom_ref1 <- paste0(indicateur,"C1_",b,"_ref.RData")
+    nom_ref2 <- paste0(indicateur,"C2_",b,"_ref.RData")
+    
+    nom_prev1 <- paste0(indicateur,"C1_",b,"_prev.RData")
+    nom_prev2 <- paste0(indicateur,"C2_",b,"_prev.RData")
+    
+    nom_clim1 <- paste0(indicateur,"C1_",b,"_clim.RData")
+    nom_clim2 <- paste0(indicateur,"C2_",b,"_clim.RData")
+  
+    load(file = file.path(dir_data, "extract", nom_ref1))
+    obs1 <- array_obs
+    load(file = file.path(dir_data, "extract", nom_ref2))
+    obs2 <- array_obs
+    
+    load(file = file.path(dir_data, "extract", nom_prev1))
+    prev1 <- array_prev
+    load(file = file.path(dir_data, "extract", nom_prev2))
+    prev2 <- array_prev
+    
+    load(file = file.path(dir_data, "extract", nom_clim1))
+    clim1 <- array_clim
+    load(file = file.path(dir_data, "extract", nom_clim2))
+    clim2 <- array_clim
+
+
+    array_obs <- obs1 + obs2
+    array_prev <- prev1 + prev2
+    array_clim <- clim1 + clim2
+    
+  nom_ref <- paste0("grassyieldC1C2_",b,"_ref.RData")
+  nom_prev <- paste0("grassyieldC1C2_",b,"_prev.RData")
+  nom_clim <- paste0("grassyieldC1C2_",b,"_clim.RData")
+
+  save(array_obs, file = file.path(dir_data, "extract", nom_ref))
+  save(array_prev, file = file.path(dir_data, "extract", nom_prev))
+  save(array_clim, file = file.path(dir_data, "extract", nom_clim))
+  
+}
+stopCluster(cl)
+
+
+tictoc::toc() 
+
+```
+
+## Bilan hydrique
+
+Agregation method: drain -irrig(fruit&olive) - prevnap
+
+```{r, echo=FALSE}
+
+  load(file = file.path(dir_data, "extract", "lat_IRRIG.RData"))
+  save(lat, file = file.path(dir_data, "extract", "lat_bilanhydr.RData"))
+
+  load(file = file.path(dir_data, "extract", "lon_IRRIG.RData"))
+  save(lon, file = file.path(dir_data, "extract", "lon_bilanhydr.RData"))
+
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+  tictoc::tic()
+  foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # loop on bootstrap samples
+  
+    drain_ref <- paste0("DRAIN",b,"_ref.RData")
+    irrig_ref <- paste0("IRRIG",b,"_ref.RData")
+    prevnap_ref <- paste0("PREVNAP",b,"_ref.RData")
+    
+    drain_ps <- paste0("DRAIN",b,"_prev.RData")
+    irrig_ps <- paste0("IRRIG",b,"_prev.RData")
+    prevnap_ps <- paste0("PREVNAP",b,"_prev.RData")
+    
+    drain_clim <- paste0("DRAIN",b,"_clim.RData")
+    irrig_clim <- paste0("IRRIG",b,"_clim.RData")
+    prevnap_clim <- paste0("PREVNAP",b,"_clim.RData")
+  
+    drain_lat <- paste0("lat_","DRAIN",".RData")
+    irrig_lat <- paste0("lat_","IRRIG",".RData")
+    prevnap_lat <- paste0("lat_","PREVNAP",".RData")
+    
+    load(file = file.path(dir_data, "extract", drain_ref))
+    obs_drain <- array_obs
+    load(file = file.path(dir_data, "extract", irrig_ref))
+    obs_irrig <- array_obs
+    load(file = file.path(dir_data, "extract", prevnap_ref))
+    obs_prevnap <- array_obs
+   
+    load(file = file.path(dir_data, "extract", drain_ps))
+    ps_drain <- array_prev
+    load(file = file.path(dir_data, "extract", irrig_ps))
+    ps_irrig <- array_prev
+    load(file = file.path(dir_data, "extract", prevnap_ps))
+    ps_prevnap <- array_prev
+
+    load(file = file.path(dir_data, "extract", drain_clim))
+    clim_drain <- array_clim
+    load(file = file.path(dir_data, "extract", irrig_clim))
+    clim_irrig <- array_clim
+    load(file = file.path(dir_data, "extract", prevnap_clim))
+    clim_prevnap <- array_clim
+   
+    load(file = file.path(dir_data, "extract", drain_lat))
+    lat_drain <- lat
+    load(file = file.path(dir_data, "extract", irrig_lat))
+    lat_irrig <- lat
+    load(file = file.path(dir_data, "extract", prevnap_lat))
+    lat_prevnap <- lat
+
+    # we select grids with the three indicators 
+    
+    samegrid <- which(lat_drain%in%lat_irrig)
+    
+    array_obs <- obs_drain[samegrid,,]*64*10^3-obs_irrig-obs_prevnap[samegrid,,]
+    array_prev <- ps_drain[samegrid,,,]*64*10^3-ps_irrig-ps_prevnap[samegrid,,,]
+    array_clim <- clim_drain[samegrid,,,]*64*10^3-clim_irrig-clim_prevnap[samegrid,,,]
+    
+  nom_ref <- paste0("bilanhydr",b,"_ref.RData")
+  nom_prev <- paste0("bilanhydr",b,"_prev.RData")
+  nom_clim <- paste0("bilanhydr",b,"_clim.RData")
+
+  save(array_obs, file = file.path(dir_data, "extract", nom_ref))
+  save(array_prev, file = file.path(dir_data, "extract", nom_prev))
+  save(array_clim, file = file.path(dir_data, "extract", nom_clim))
+  
+  # latitude 
+  
+  
+}
+stopCluster(cl)
+
+
+tictoc::toc() 
+
+```

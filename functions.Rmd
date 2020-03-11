@@ -4,7 +4,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE, echo=FALSE}
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/emmah" 
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
 dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(dplyr)
