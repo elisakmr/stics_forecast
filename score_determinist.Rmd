@@ -1,0 +1,208 @@
+---
+title: "Deterministic scores"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure"
+
+library(dplyr)
+library(tidyverse)
+library(plyr)
+library(easyVerification)
+library(verification)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(readr)
+
+```
+## Parameters 
+
+```{r }
+
+# temporal agregation
+temp <- 9:20
+
+# bootstrap and cores
+no_core <- 6
+nboot <- 100
+
+# variables
+indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+  ### temporalité
+  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
+      temporalite <- "yearly"
+  }else {temporalite <- "quinzaine"}
+
+```
+
+                                            ### GRIDDED ###
+                                            
+                                            
+## Gridded scores
+
+Scores computed for each grid separately.
+Indicators are assessed on a 28 days time window and over the whole season
+
+```{r}
+
+tictoc::tic()
+
+acc <- vector()
+rmse_ps <- vector()
+rmse_clim <- vector()
+
+for (indicateur in indicateurs){
+
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+
+  foreach(b=1:nboot, .packages=c('easyVerification', 's2dverification')) %dopar%  { # loop on bootstrap samples
+  #Spearman <- easyVerification:::EnsCorr
+    
+    nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
+    nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
+    nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
+    nom_an_prev <- paste0(indicateur,b,"_anomaly_prev_uerra5.RData")
+    nom_an_obs <- paste0(indicateur,b,"_anomaly_obs_uerra5.RData")
+    
+    load(file = file.path(dir_data, "extract", nom_ref))
+    load(file = file.path(dir_data, "extract", nom_prev))
+    load(file = file.path(dir_data, "extract", nom_clim))
+    load(file = file.path(dir_data, "extract", nom_an_prev))
+    load(file = file.path(dir_data, "extract", nom_an_obs))
+    
+    ngrids <- dim(array_obs)[1]
+    det_seas <- array(NA, dim = c(ngrids,3))
+    
+  if (temporalite=="yearly"){
+    prev_seas <- array_prev 
+    clim_seas <- array_clim
+    ref_seas <- array_obs
+  } else if (temporalite=="quinzaine") {
+          prev_seas <- apply(array_prev[,,,temp], c(1,2,3), sum) 
+          clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum)
+          ref_seas <- apply(array_obs[,,temp], c(1,2), sum)
+    }
+    
+    
+      # RMSE #
+ 
+    rmse_ps <- veriApply("EnsRmse", fcst=prev_seas, obs=ref_seas, parallel = TRUE)
+    rmse_clim <- veriApply("EnsRmse", fcst=clim_seas, obs=ref_seas, parallel = TRUE)
+          
+      # ACC #
+    
+    acc <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly, parallel = TRUE)
+    
+    score_det <- array(c(acc, rmse_ps, rmse_clim), dim=c(ngrids,3))
+    
+    nom_det <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
+  
+    save(score_det, file = file.path(dir_data, "score", nom_det))
+  
+
+}
+stopCluster(cl)
+
+}
+tictoc::toc() 
+
+
+
+```
+
+  
+                                            ### BOX SCORES ###
+                                            
+                                            
+## Aggregated scores
+
+Scores computed for each grid separately.
+Indicators are assessed on a 28 days time window and over the whole season
+
+```{r}
+
+coeff_rmsps <- vector()
+coeff_rmsclim <- vector()
+coeff_acc <- vector()
+
+for (indicateur in indicateurs){
+  
+  load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
+
+  det_boot <- data.frame()
+
+  for(b in 1:nboot)   {
+    
+    # loading gridded scores
+  
+    nom_prevseas <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
+    load(file = file.path(dir_data, "score", nom_prevseas))
+    ngrids <- dim(score_det)[1]
+
+    val_prevseas <- list()
+  
+    for (i in 1:ngrids){
+      val_prevseas[[i]] <- score_det[i,]*cos(pi*lat[i]/180)
+      coeff_rmsps[i] <- cos(pi*lat[i]/180)
+      coeff_rmsclim[i] <- cos(pi*lat[i]/180)
+      coeff_acc[i] <- cos(pi*lat[i]/180)
+      
+     # removing NAs
+      if (is.na(score_det[i,1])==TRUE){
+        coeff_acc[i] <- NA
+      }
+      
+      if (is.na(score_det[i,2])==TRUE){
+        coeff_rmsps[i] <- NA
+      }
+      
+      if (is.na(score_det[i,3])==TRUE){
+        coeff_rmsclim[i] <- NA
+      }
+
+          }
+    
+    # grid average
+    array_score <- apply(array(unlist(val_prevseas) , c(3,ngrids)), 1, sum, na.rm = T)
+    det_boot[b,1] <- array_score[1]/sum(coeff_acc, na.rm = T)
+    det_boot[b,2] <- array_score[2]/sum(coeff_rmsps, na.rm = T)
+    det_boot[b,3] <- array_score[3]/sum(coeff_rmsclim, na.rm = T)
+  }
+  
+    nom_bootseas <- paste0(indicateur, "scoredet_boot_uerra5.csv")
+    save(det_boot, file = file.path(dir_data, "score", nom_bootseas))
+    
+    det_meanboot <- apply(det_boot, 2, mean, na.rm=T)
+    #colnames(det_meanboot) <- c("msess","acc")
+    nom_meanseas <- paste0(indicateur, "detbox_meanboot_uerra5.csv")
+    write_csv(as.data.frame(det_meanboot), file.path(dir_data, "score", nom_meanseas))
+
+}
+
+```
+
+
+## Box score significance test
+
+Wilcoxon test with H0: MSESS non supérieure à 0 + ACC non supérieur à 0.3
+
+```{r}
+ind <- 2
+
+   # season
+  nom_bootseas <- paste0(indicateur, "scoredet_boot.csv")
+  load(file = file.path(dir_data, "score", nom_bootseas))
+
+  boxboot <- array(unlist(det_boot) , c(2,nboot))
+  
+  wilcox.test(boxboot[1,], mu = 0, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # msess
+  wilcox.test(boxboot[2,], mu = 0.3, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # acc
+
+
+```

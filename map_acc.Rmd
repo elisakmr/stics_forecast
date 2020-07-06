@@ -1,0 +1,133 @@
+---
+title: "Mapping ACC"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(maps)
+library(nnet)
+library(ggplot2)
+library(latticeExtra)
+library(sp)
+library(rgdal)
+library(sf)
+library(ggmap)
+library(maps)
+library(ggplot2)
+library(latticeExtra)
+library(sp)
+library(rgdal)
+library(sf)
+library(ggmap)
+library(mapview)
+library(ggnewscale)
+
+```
+
+## Parameters 
+
+```{r setup, include=FALSE}
+
+# variables
+indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+indicateur <- indicateurs[5]
+
+# score value interval
+acc_limits <- c(-1,1)
+
+# color palette for msess score
+score_palette <- c("#ca0020", "#f4a582", "#f7f7f7", "#92c5de", "#0571b0")
+
+# !! DO NOT MODIFY !! one color palette for signifiance plotting  
+sign_palette <- c("black", "black")
+
+# bootstrap and cores
+nboot <- 100
+
+```
+
+
+## Mapping MSESS through a shapefile
+
+We transform the array of scores into a shapefile containing gridded score values and their significance.
+Significance is computed using Wilcoxon's test (H0: mean value not above 0) on bootstrapped score values.
+
+```{r }
+
+### BUIDLING SHAPEFILE OF MEAN MSESS VALUES AND THEIR SIGNIFICANCE ###
+
+  ## extracting bootstrapped msess values
+
+nom_ref <- paste0(indicateur,1,"_ref_uerra5.RData")
+load(file = file.path(dir_data, "extract", nom_ref))
+
+  ngrids <- dim(array_obs)[1]
+
+score_ps <- array(NA, dim=c(ngrids, 3, nboot)) 
+
+  for (b in 1:nboot)  { 
+  
+    nom_det <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
+    load(file = file.path(dir_data, "score", nom_det))
+
+    score_ps[,,b] <- score_det[,]
+
+  }
+
+  ## we build a matrix gathering all info needed for the shapefile:
+
+    # coordinates
+
+load(file = file.path(dir_data, "extract", paste0(indicateur, "_lon.RData")))
+load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
+  
+ngrids <- dim(score_det)[1]
+
+matrix4shp <- matrix(0, nrow = ngrids, ncol = 4) # col: skill score, significant, lat, lon 
+matrix4shp[,3] <- lat
+matrix4shp[,4] <- lon
+  
+    # mean skill and wilcoxon test outcome
+
+matrix4shp[,2] <- rep(0, ngrids) # signficance: 0 everywhere first, will switch to 1 if positive statistical test outcome
+matrix4shp[,1] <- apply(score_ps[,1,], 1, mean, na.rm = TRUE) #  mean of bootstrapped MSESS  
+
+    # Wilcoxon test
+
+for (i in 1:ngrids)  { 
+  if (length(which(is.na(score_ps[i,1,]))) >= 10) {matrix4shp[i,2] <- 0; matrix4shp[i,1] <- NA}
+  else { wmsess <- wilcox.test(score_ps[i,1,], mu = 0.3, alternative = "greater", conf.level = 0.95) # h0 represented by "mu = 0.3" & "alternative = greater", alternative being h1
+
+    if (wmsess$p.value < 0.05) { # p value de 5%
+    matrix4shp[i,2] <- 1 # 1 = test validé, 0 = non validé (voir plus haut)
+    }
+  }
+}
+
+    # building shapefile 
+
+df_shp <- data.frame(matrix4shp)
+colnames(df_shp) <- c("acc", "significance","lat","lon")
+coordinates(df_shp) <- ~lon+lat
+proj4string(df_shp) <- CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+shp_grid <- st_as_sf(df_shp) # we transform spatial data frame into shapefile, which is plotting friendly
+shp_grid$significance[which(shp_grid$significance==0)] <- NA # to help plotting, we set significance as NA instead of 0
+
+
+### MAPPING WITH GGPLOT2 ###
+
+ggmap(back_map) +
+geom_sf(data = shp_grid, aes(color = acc), size=2.15, shape = 15) + 
+  scale_color_gradientn(colours=score_palette, limits = acc_limits, na.value = "black", guide = guide_colorbar(barwidth = 10, barheight = 0.5, nbin = 5)) +
+new_scale("color")+
+geom_sf(data = shp_grid, aes(color = significance), shape = 3, size = 0.15, show.legend = FALSE) +
+  scale_color_gradientn(colours=sign_palette, na.value = "transparent")+
+theme(legend.direction = "horizontal", legend.position = "right", legend.title = element_text(),  
+      plot.title = element_text(size = 12, hjust = 0, vjust = 1.5)) + 
+  labs(title = paste0(indicateur," MJJASO acc "))
+
+```

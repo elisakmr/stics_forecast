@@ -1,0 +1,107 @@
+---
+title: "Probabilistic transformation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure"
+
+library(dplyr)
+library(stats)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(easyVerification)
+
+```
+
+## Parameters 
+
+```{r}
+
+# temporal aggregation
+temp <- 9:20
+
+# chosen quantile
+kantile <- "ter" # ter or quint
+
+# bootstrap and cores
+no_core <- 6
+nboot <- 100
+
+if (kantile=="quint"){
+  proba = 1:4/5; e = 5
+} else { proba = 1:2/3; e = 3}
+
+# variables
+indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+  ### temporalité
+  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
+      temporalite <- "yearly"
+  }else {temporalite <- "quinzaine"}
+
+```
+
+## Transforming data 
+
+Regarding 4 selected events (higher/lower tercile/quintile) reference continuous values are transformed into binary values; ensemble prevision values are transformed into probabilistic values (computed from the ensemble spread). 
+
+```{r}
+
+tictoc::tic()
+
+load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+
+for (indicateur in indicateurs){
+  
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+
+foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstrap samples
+
+  nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_ref))
+  nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_prev))
+  nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_clim))
+
+  ngrids <- dim(array_obs)[1]
+
+  if (temporalite=="yearly"){
+    int_obs <- array_obs 
+    int_prev <- array_prev
+    int_clim <- array_clim
+  } else if (temporalite=="quinzaine") {
+    int_obs <- apply(array_obs[,,temp],c(1,2), sum) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
+    int_prev <- apply(array_prev[,,,temp],c(1,2,3), sum)
+    int_clim <- apply(array_clim[,,,temp],c(1,2,3), sum)
+  }
+  
+  bin_ref <- array (NA, dim=c(ngrids,nan,e))
+  prob_ps <- array (NA, dim=c(ngrids,nan,e))
+  prob_clim <- array (NA, dim=c(ngrids,nan,e))
+  
+  for (i in 1:ngrids){
+    bin_ref[i,,] <- count2prob(convert2prob(int_obs[i,], prob = proba), type = 4)
+    prob_ps[i,,] <- count2prob(convert2prob(int_prev[i,,], prob = proba), type = 4)
+    prob_clim[i,,] <- count2prob(convert2prob(int_clim[i,,], prob = proba), type = 4)
+  }
+    
+  nom_prev <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")
+  nom_clim <- paste0(indicateur,b,"climprob_uerra5",kantile, ".RData")
+  nom_ref <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
+    
+  save(prob_ps, file = file.path(dir_data, "extract", nom_prev))
+  save(prob_clim, file = file.path(dir_data, "extract", nom_clim))
+  save(bin_ref, file = file.path(dir_data, "extract", nom_ref))
+} 
+ 
+  }
+
+tictoc::toc()
+
+```

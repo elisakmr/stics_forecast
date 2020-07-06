@@ -1,0 +1,235 @@
+---
+title: "Area under ROC"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(easyVerification)
+library(verification)
+library(dplyr)
+library(stats)
+library(SpecsVerification)
+library(s2dverification)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(readr)
+library(purrr)
+
+```
+
+## Parameters 
+
+```{r }
+
+# temporal agregation
+temp <- 9:20
+
+# chosen quantile
+kantile <- "ter" # ter or quint
+
+# bootstrap and cores
+no_core <- 6
+nboot <- 100
+
+if (kantile=="quint"){
+  proba = 1:4/5; events = 5
+} else { proba = 1:2/3; events = 3}
+
+# variables
+indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+
+
+```
+                                            
+## Gridded scores
+
+Scores computed for each grid separately.
+Indicators are assessed on a 28 days time window and over the whole season
+
+1: roc quant1
+2: roc last quant
+3: brier quant1
+4: brier ss quant1
+5: brier last quant
+6: brier ss last quant
+
+```{r}
+
+tictoc::tic()
+
+for (indicateur in indicateurs){
+  
+  # temporalité
+  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
+      temporalite <- "yearly"
+  }else {temporalite <- "quinzaine"}
+
+  cl <- makeCluster(no_core)
+  registerDoParallel(cl)
+
+foreach(b=1:nboot, .packages = c('easyVerification', 's2dverification'), .combine=rbind) %dopar%  { # loop on bootstrap samples
+
+
+  nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
+  nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
+  nom_prev_prob <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")    
+  nom_clim_prob <- paste0(indicateur,b,"climprob_uerra5",kantile, ".RData")    
+  nom_ref_bin <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
+  
+  load(file = file.path(dir_data, "extract", nom_prev))
+  load(file = file.path(dir_data, "extract", nom_ref))
+  load(file = file.path(dir_data, "extract", nom_prev_prob))
+  load(file = file.path(dir_data, "extract", nom_clim_prob))
+  load(file = file.path(dir_data, "extract", nom_ref_bin))
+  
+  
+  ngrids <- dim(array_obs)[1]
+  scoreprob <- array (NA, dim=c(ngrids,6))
+  rapport_climps1 <- vector()
+  rapport_climps2 <- vector()
+  
+  
+  if (temporalite=="yearly"){
+    seas_obs <- array_obs
+    seas_prev <- array_prev
+  } else if (temporalite=="quinzaine") {
+    seas_obs <- array()
+    seas_prev <- array()
+    seas_obs <- apply(array_obs[,,temp],c(1,2), sum)# seasonal: WARNING WITH AGREGATION METHOD!!!!
+    seas_prev <- apply(array_prev[,,,temp],c(1,2,3), sum)
+    
+  }
+  
+  scoreprob[,1] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat1 
+  
+  if (kantile=="quint"){
+    scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat5
+  } else { scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat3 }
+
+  for (i in 1:ngrids){
+  scoreprob[i,3] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs
+  rapport_climps1[i] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs/BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_clim[i,,1])))$bs
+  
+
+  scoreprob[i,5] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs
+  rapport_climps2[i] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs/BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_clim[i,,events])))$bs
+  
+  }
+  scoreprob[,4] <- 1-rapport_climps1
+  scoreprob[,6] <- 1-rapport_climps2
+  nom_scoreroc <- paste0(indicateur, b, "_", kantile, "aucgrid_uerra5.RData")
+
+  save(scoreprob, file = file.path(dir_data, "score", nom_scoreroc))
+
+  }
+  
+stopCluster(cl)
+
+}
+
+tictoc::toc()
+
+
+```
+
+## Box-agregated scores
+
+Aggregation computed using latitude weighting   
+
+```{r}
+
+tictoc::tic()
+
+for (indicateur in indicateurs){
+
+  auc_boot <- list()
+  brier_boot <- list()
+  
+  load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
+  ngrids <- length(lat)
+
+  for (b in 1:nboot){
+    
+    nom_prev <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")    
+    nom_ref <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
+    load(file = file.path(dir_data, "extract", nom_prev))
+    load(file = file.path(dir_data, "extract", nom_ref))
+    
+    int_auc <- vector()
+    int_brier <- vector()
+    for (e in c(1:events)){ # through different quantiles
+      
+      int_auc[e] <- score_boite_prob(prob_ps, bin_ref, lat, nb_bin = 10, e)$AUC # seasonal 
+      int_brier[e] <- brier_score_boite(prob_ps, bin_ref, lat, e) # seasonal 
+  
+      }
+ 
+   auc_boot[[b]] <- int_auc 
+   brier_boot[[b]] <- int_brier 
+  
+  }
+ 
+  nom_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
+  save(auc_boot, file = file.path(dir_data, "score", nom_box))
+
+  brier_box <- paste0(indicateur, "_", kantile, "boxbrier_uerra5.RData")
+  save(brier_boot, file = file.path(dir_data, "score", brier_box))
+  
+}
+
+tictoc::toc()
+
+```
+
+
+## Box-agregated score analysis
+
+Transform lists in a more handy format
+
+```{r}
+
+for (indicateur in indicateurs){
+  
+   # season
+  nom_auc <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
+  load(file = file.path(dir_data, "score", nom_auc))
+  nom_brier <- paste0(indicateur, "_", kantile, "boxbrier_uerra5.RData")
+  load(file = file.path(dir_data, "score", nom_brier))
+  
+  sum_aucbox <- apply(array(unlist(auc_boot) , c(events,nboot)), 1, mean, na.rm = T)
+  sum_brierbox <- apply(array(unlist(brier_boot) , c(events,nboot)), 1, mean, na.rm = T)
+  
+  nom_aucav <- paste0(indicateur, "_", kantile, "avboxauc_uerra5.csv")
+  write_csv(as.data.frame(sum_aucbox), file.path(dir_data, "score", nom_aucav))
+  nom_brierav <- paste0(indicateur, "_", kantile, "avboxbrier_uerra5.csv")
+  write_csv(as.data.frame(sum_aucbox), file.path(dir_data, "score", nom_brierav))
+  
+}
+
+```
+
+## Box score significance test
+
+Wilcoxon test with H0: AUC non supérieure à 0.5
+
+```{r}
+indicateur <- "bilanhydr"
+indicateur <- "grassyieldC1C2_"
+lastquant <- 3 # 3 if terciles or 5
+
+  nom_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
+  load(file = file.path(dir_data, "score", nom_box))
+  
+  boxboot <- array(unlist(auc_boot) , c(events,nboot))
+  
+   wilcox.test(boxboot[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
+   wilcox.test(boxboot[lastquant,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
+
+
+```

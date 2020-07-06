@@ -1,0 +1,174 @@
+---
+title: "Memory effect"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(stats)
+
+```
+
+## Parameters 
+
+```{r }
+
+# bootstrap and cores
+no_core <- 6
+nboot <- 100
+
+# variables
+indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+indicateur <- indicateurs[5]
+  ### temporalité
+  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
+      temporalite <- "yearly"
+  }else {temporalite <- "quinzaine"}
+
+# runs
+run <- seq(from=1, to=25, by=1)
+nrun <- length(run)
+
+# temporal agregation
+temp <- 9:20
+ntemp <- length(temp)
+
+# automatic parameters
+nom_ref <- paste0(indicateur,1,"_prev_uerra5.RData")
+load(file = file.path(dir_data, "extract", nom_ref))
+ngrids <- dim(array_prev)[1]
+nan <- dim(array_prev)[2]
+nrun <- dim(array_prev)[3]
+an <- seq(1993,2016,1)
+
+```
+
+## Loading and shaping data
+
+```{r }
+### LOADING ###
+
+                                            ### WITH TIME DIMENSION ###
+if (temporalite=="quinzaine"){
+
+ps_original <- array(NA, dim=c(ngrids, nan, nrun, ntemp))
+ref_original <- array(NA, dim=c(ngrids, nan, ntemp))
+
+ for (year in an){
+ y <- which(an==year)
+
+       # bootstrap iteration index of the year selected
+    load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+     
+    list_match <- lapply(rand_year, function(x) which(year == x)) # list of matchs between list of years randomly generated for the bootstrap and the year we are interested in
+     
+     y_index <- list_match[[1]] # year index within the bootstrap iteration
+     b_index <- 1 # bootstrap iteration index
+     for (b in 1:(nboot-1)){ # pick the first iteration and first index matching the year we are looking for
+       if (length(list_match[[b]])<1 & length(y_index)<1) {y_index <- list_match[[b+1]]; b_index <- b+1}
+       else {y_index <- y_index; b_index <- b_index}
+     }
+     
+  nom_prev <- paste0(indicateur,b_index,"_prev_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_prev))
+  ps_original[,y,,] <- array_prev[,y_index[1],,temp]
+  
+  nom_ref <- paste0(indicateur,b_index,"_ref_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_ref))
+  ref_original[,y,] <- array_obs[,y_index[1],temp]
+}
+
+
+                                            ### WITHOUT TIME DIMENSION ###
+} else if (temporalite=="yearly"){
+
+
+ps_original <- array(NA, dim=c(ngrids, nan, nrun))
+ref_original <- array(NA, dim=c(ngrids, nan))
+
+ for (year in an){
+ y <- which(an==year)
+
+       # bootstrap iteration index of the year selected
+    load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+     
+    list_match <- lapply(rand_year, function(x) which(year == x)) # list of matchs between list of years randomly generated for the bootstrap and the year we are interested in
+     
+     y_index <- list_match[[1]] # year index within the bootstrap iteration
+     b_index <- 1 # bootstrap iteration index
+     for (b in 1:(nboot-1)){ # pick the first iteration and first index matching the year we are looking for
+       if (length(list_match[[b]])<1 & length(y_index)<1) {y_index <- list_match[[b+1]]; b_index <- b+1}
+       else {y_index <- y_index; b_index <- b_index}
+     }
+     
+  nom_prev <- paste0(indicateur,b_index,"_prev_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_prev))
+  ps_original[,y,] <- array_prev[,y_index[1],]
+  
+  nom_ref <- paste0(indicateur,b_index,"_ref_uerra5.RData")
+  load(file = file.path(dir_data, "extract", nom_ref))
+  ref_original[,y] <- array_obs[,y_index[1]]
+}
+
+}
+
+ngrids <- dim(ref_original)[1]
+
+
+### RESHAPING ###
+
+# we build a 3 columns data frame: grid, year, value
+
+df_out <- data.frame()
+
+for (mb in 1:nrun){
+    int <- as.data.frame(ps_original[,,mb])
+    colnames(int) <- an
+    int <- int %>% gather(an) %>% mutate(maille=rep(seq(1,ngrids,1), times=nan))
+    df_out <- rbind(df_out, int)
+}
+
+
+```
+
+## Implementing ANOVA
+
+```{r }
+
+fit <- aov(data = df_out, formula= value ~ an + maille)
+summary(fit)
+
+```
+
+## Exploration plots
+
+```{r }
+
+par(mfrow=c(1,2))
+boxplot(log(value) ~ an, data=df_out, cex.lab=1.5, xlab="year",ylab="log(value)")
+boxplot(log(value) ~ maille, data=df_out, cex.lab=1.5, xlab="maille",ylab="log(value)")
+# interactions: boxplot(log(value) ~ an*maille, data=df_out, cex.lab=1.5, xlab="combinaison annee et maille ",ylab="log(value)")
+
+
+```
+
+## Verification plots
+
+```{r }
+
+fit <- aov(data = df_out, formula= value ~ an+maille)
+plot(fit)
+
+
+```
+
+
+

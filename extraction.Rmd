@@ -1,0 +1,233 @@
+---
+title: "data_extraction"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+
+```
+
+## Parameters 
+
+```{r }
+
+# bootstrap and cores
+no_core <- 6
+nboot <- 100
+
+# variables
+indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+  ### temporalité
+  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
+      temporalite <- "yearly"
+  }else {temporalite <- "quinzaine"}
+
+# runs
+run <- seq(from=1, to=25, by=1)
+nrun <- length(run)
+
+# temporal agregation
+temp <- 9:20
+ntemp <- length(temp)
+
+```
+
+## Loading data in csv file
+
+```{r data loading, echo=FALSE}
+
+# UERRA
+
+raw_drainall <- read.csv(file = file.path(dir_data, "Extract_STICS-KCETP_DRAIN_ALL_P05_crau45_1993_2016.csv"), header = TRUE, sep = ",")
+
+raw_etall <- read.csv(file = file.path(dir_data, "Extract_STICS-KCETP_ET_ALL_P05_crau45_1993_2016.csv"), header = TRUE, sep = ",")
+
+raw_yieldwheat <- read.csv(file = file.path(dir_data, "Extract_STICS-KCETP_RENDEMENT_WHEAT_P05_crau45_1993_2016.csv"), header = TRUE, sep = ",")
+
+raw_yieldgrass <- read.csv(file = file.path(dir_data, "Extract_STICS-KCETP_RENDEMENT_GRASS_P05_crau45_1993_2016.csv"), header = TRUE, sep = ",")
+
+raws <- list()
+raws[[1]] <- raw_drainall
+raws[[2]] <- raw_etall
+raws[[3]] <- raw_yieldwheat
+raws[[4]] <- raw_yieldgrass %>% filter(period == "ANNEE") 
+raws[[5]] <- raw_yieldgrass %>% filter(period == "C2" | period == "C3") %>% group_by(climattype, climatscenario, year_, cellnum) %>% mutate(indicatorvalue=sum(indicatorvalue)) %>% filter(period == "C2")
+
+```
+
+## Automatic parameters extraction
+
+List of variables, years, grids, extracted directly from the data set.
+
+```{r indicators, echo=FALSE}
+
+# years
+an <- unique(raw_drainall[,"year_"])
+nan <- length(an)
+
+# temporal dimension
+dimT <- unique(raw_drainall[,"period"])
+ndimT <- length(dimT)
+
+```
+
+## Extracting indicator values
+
+For each indicator, values are stored in 3 multi-dimensional arrays: one per climat type (reference, prevision, climatology)
+Reference array has 3 dimension: grid+year+time
+Prevision/climatology arrays have 4 dimensions: grid+year+run+time
+
+```{r, echo=FALSE}
+
+# generating random year series
+# rand_year <- list()
+# for (b in 1:nboot){
+#    rand_year[[b]] <- sample(1:nan, nan, replace = TRUE) 
+#  }
+#  save(rand_year, file = file.path(dir_data, "extract", "years.RData"))
+
+load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+
+tictoc::tic() 
+
+for (d in 1:3) {
+  
+  data <- raws[[d]]
+  indicateur <- indicateurs[d]
+  
+                                               ### COORDINATES ###
+  
+  
+  # we pick a random climat type, year and t dimension, as grid range assessed remains the same no matter what are the values of these parameters
+
+  # longitudes
+raw_filtered <- raws[[d]] %>% select(cellnum,lon,lat) %>% distinct(cellnum, .keep_all= TRUE)
+lon <- raw_filtered %>% select(lon)
+lon <- as.numeric(unlist(lon))
+
+save(lon, file = file.path(dir_data, "extract", paste0(indicateur, "_lon.RData")))
+
+  # latitudes
+lat <- raw_filtered %>% select(lat)
+lat <- as.numeric(unlist(lat))
+
+save(lat, file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
+
+  # number of grids
+ngrids <- dim(raw_filtered)[1]
+
+ # climat type filtering
+    obs_data <- data %>% 
+      filter(climattype == "REF") 
+    
+    prev_data <- data %>% 
+      filter(climattype == "PS") 
+    
+    clim_data <- data %>% 
+      filter(climattype == "CLIMATO") 
+
+ # extracting data
+cl <- makeCluster(no_core)
+registerDoParallel(cl)
+
+foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # loop on bootstrap samples
+  
+      
+                                      ### EXTRACTING VARIABLES WITHOUT TIME DIMENSION ###
+      
+  if (temporalite=="yearly"){
+    
+    array_obs <- array(NA, dim=c(ngrids, nan)) 
+    array_prev <- array(NA, dim=c(ngrids, nan, nrun))
+    array_clim <- array(NA, dim=c(ngrids, nan, nrun))
+
+    for (j in 1:nan){
+      y <- rand_year[[b]][j] # we pick a year from the randomize serie
+      
+      # at first we filter on year
+      obs_int <- obs_data %>% 
+      filter(year_ == y) 
+      prev_int1 <- prev_data %>% 
+      filter(year_ == y) 
+      clim_int1 <- clim_data %>% 
+      filter(year_ == y) 
+
+
+        array_obs[,j] <- as.vector(unlist(obs_int %>% arrange(cellnum) %>% select(indicatorvalue))) 
+ 
+      # finally filtering on runs (prevision and climatology only)
+        for (r in 1:nrun){
+        array_prev[,j,r] <- as.vector(unlist(prev_int1 %>% filter(climatscenario == r) %>% arrange(cellnum) %>% select(indicatorvalue)))
+        array_clim[,j,r] <- as.vector(unlist(clim_int1 %>% filter(climatscenario == r) %>% arrange(cellnum) %>% select(indicatorvalue)))
+        }
+
+    }
+    
+  
+                                      ### EXTRACTING VARIABLES WITH TIME DIMENSION ###
+    
+       # creating arrays to store data: grids*years(*run)*time 
+        
+  } else if (temporalite=="quinzaine") { array_obs <- array(NA, dim=c(ngrids, nan, ndimT)) 
+    array_prev <- array(NA, dim=c(ngrids, nan, nrun, ndimT))
+    array_clim <- array(NA, dim=c(ngrids, nan, nrun, ndimT))
+
+    for (j in 1:nan){
+      y <- rand_year[[b]][j] # we pick a year from the randomize serie
+      
+      # at first we filter on year
+      obs_int <- obs_data %>% 
+      filter(year_ == y) 
+      prev_int1 <- prev_data %>% 
+      filter(year_ == y) 
+      clim_int1 <- clim_data %>% 
+      filter(year_ == y) 
+
+
+      # then we filter on time dimension (within a year)
+      for (t in c(1:ndimT)){  
+        array_obs[,j,t] <- as.vector(unlist(obs_int %>% filter(period == dimT[t]) %>% arrange(cellnum) %>% select(indicatorvalue))) 
+        
+        prev_int2 <- prev_int1 %>% 
+        filter(period == dimT[t])  
+        clim_int2 <- clim_int1 %>% 
+        filter(period == dimT[t])  
+ 
+      # finally filtering on runs (prevision and climatology only)
+        for (r in 1:nrun){
+        array_prev[,j,r,t] <- as.vector(unlist(prev_int2 %>% filter(climatscenario == r) %>% arrange(cellnum) %>% select(indicatorvalue)))
+        array_clim[,j,r,t] <- as.vector(unlist(clim_int2 %>% filter(climatscenario == r) %>% arrange(cellnum) %>% select(indicatorvalue)))
+        }
+      }
+    }
+      
+    }
+  
+    nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
+    nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
+    nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
+    
+    # saving data
+    save(array_obs, file = file.path(dir_data, "extract", nom_ref))
+    save(array_prev, file = file.path(dir_data, "extract", nom_prev))
+    save(array_clim, file = file.path(dir_data, "extract", nom_clim))
+  }
+  
+} 
+
+stopCluster(cl)
+
+
+tictoc::toc()
+
+```
