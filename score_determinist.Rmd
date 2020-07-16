@@ -2,11 +2,10 @@
 title: "Deterministic scores"
 output: html_document
 ---
+The code aims at computing deterministic scores, being Anomaly Correlation Coefficient, and Root Mean Square Error, for ps (and climato for rmse only).
+ACC requires anomaly arrays, computed in "anomaly" 
 
 ```{r setup, include=FALSE}
-
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure"
 
 library(dplyr)
 library(tidyverse)
@@ -20,50 +19,77 @@ library(doParallel)
 library(readr)
 
 ```
+
 ## Parameters 
+
+Some are loaded (because they remain permanent through codes)
+Some are set here and can therefore be modified by user
 
 ```{r }
 
-# temporal agregation
-temp <- 9:20
+                                     ### SELECTED PARAMETERS (to be set by user) ###
 
-# bootstrap and cores
+# selected project and directories
+selected_project <- "stics" # stics or season or tree
+dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+# number of cores
 no_core <- 6
-nboot <- 100
 
-# variables
-indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
-  ### temporalité
-  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
-      temporalite <- "yearly"
-  }else {temporalite <- "quinzaine"}
+
+                                      ### LOADED PARAMETERS (permanent) ###
+
+
+# loading number of bootstrap interations
+load(file = file.path(dir_data, "extract", "nboot.RData"))
+
+# loading variables
+load(file = file.path(dir_data, "extract", "indicateurs.RData"))
+# loading time scales and agregation type
+load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
+load(file = file.path(dir_data, "extract", "time_window.RData")) # if yes which window is selected
+load(file = file.path(dir_data, "extract", "agregation.RData")) # if yes what type of aggregation should be applied
+
+ntemp <- length(temp) # number of elements in time dimension
+
+# loading ensemble members
+load(file = file.path(dir_data, "extract", "runs.RData"))
+nrun <- length(run) # number of members
+
+# loading years
+load(file = file.path(dir_data, "extract", "years.RData"))
+nan <- length(an) # number of years
 
 ```
-
-                                            ### GRIDDED ###
-                                            
                                             
 ## Gridded scores
 
-Scores computed for each grid separately.
-Indicators are assessed on a 28 days time window and over the whole season
+Scores computed for each grid separately, using "EasyVerification" package
 
 ```{r}
 
-tictoc::tic()
+tictoc::tic() # start timer
 
 acc <- vector()
 rmse_ps <- vector()
 rmse_clim <- vector()
 
 for (indicateur in indicateurs){
+  
+  d <- which(indicateurs==indicateur)
+  temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+  agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
 
-  cl <- makeCluster(no_core)
-  registerDoParallel(cl)
-
-  foreach(b=1:nboot, .packages=c('easyVerification', 's2dverification')) %dopar%  { # loop on bootstrap samples
-  #Spearman <- easyVerification:::EnsCorr
+ # parallelizing extraction on bootstrap iterations
     
+cl <- makeCluster(no_core) # setting up number of cores
+registerDoParallel(cl) # parallelizing on them
+
+  foreach(b=1:nboot, .packages=c('easyVerification', 's2dverification')) %dopar%  { # for-loop parallelized
+
+      # loading reference ps and clim data and anomaly
+
     nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
     nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
     nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
@@ -77,16 +103,25 @@ for (indicateur in indicateurs){
     load(file = file.path(dir_data, "extract", nom_an_obs))
     
     ngrids <- dim(array_obs)[1]
+    # setting up array for scores to be stored in
     det_seas <- array(NA, dim = c(ngrids,3))
     
-  if (temporalite=="yearly"){
+  # time aggregation if the time dimension is "multi" 
+  if (temporalite=="single"){
     prev_seas <- array_prev 
     clim_seas <- array_clim
     ref_seas <- array_obs
-  } else if (temporalite=="quinzaine") {
-          prev_seas <- apply(array_prev[,,,temp], c(1,2,3), sum) 
-          clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum)
-          ref_seas <- apply(array_obs[,,temp], c(1,2), sum)
+  } else if (temporalite=="multi") {
+    if (agreg=="sum"){
+      prev_seas <- apply(array_prev[,,,temp], c(1,2,3), sum) 
+      clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum) 
+      ref_seas <- apply(array_obs[,,temp], c(1,2), sum)
+    } else if (agreg=="mean"){
+      prev_seas <- apply(array_prev[,,,temp], c(1,2,3), mean) 
+      clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum) 
+      ref_seas <- apply(array_obs[,,temp], c(1,2), mean)
+    }
+    
     }
     
     
@@ -99,31 +134,28 @@ for (indicateur in indicateurs){
     
     acc <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly, parallel = TRUE)
     
+    # storing scores
     score_det <- array(c(acc, rmse_ps, rmse_clim), dim=c(ngrids,3))
-    
+    # file naming 
     nom_det <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
-  
+    # file saving 
     save(score_det, file = file.path(dir_data, "score", nom_det))
   
 
 }
-stopCluster(cl)
+stopCluster(cl) # stop parallelizing
 
 }
-tictoc::toc() 
+tictoc::toc()# stop timer
 
 
 
 ```
 
   
-                                            ### BOX SCORES ###
+## Box aggregated scores
                                             
-                                            
-## Aggregated scores
-
-Scores computed for each grid separately.
-Indicators are assessed on a 28 days time window and over the whole season
+It computes ACC and RMSE score at box level, by averaging grid scores with latitude weighting
 
 ```{r}
 
@@ -132,7 +164,8 @@ coeff_rmsclim <- vector()
 coeff_acc <- vector()
 
 for (indicateur in indicateurs){
-  
+
+  # loading latitude
   load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
 
   det_boot <- data.frame()
@@ -140,13 +173,12 @@ for (indicateur in indicateurs){
   for(b in 1:nboot)   {
     
     # loading gridded scores
-  
     nom_prevseas <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
     load(file = file.path(dir_data, "score", nom_prevseas))
     ngrids <- dim(score_det)[1]
 
     val_prevseas <- list()
-  
+   # computed weighted value and saving all coefficient in a vector
     for (i in 1:ngrids){
       val_prevseas[[i]] <- score_det[i,]*cos(pi*lat[i]/180)
       coeff_rmsps[i] <- cos(pi*lat[i]/180)
@@ -168,18 +200,19 @@ for (indicateur in indicateurs){
 
           }
     
-    # grid average
+    # computing mean of weighted values
     array_score <- apply(array(unlist(val_prevseas) , c(3,ngrids)), 1, sum, na.rm = T)
-    det_boot[b,1] <- array_score[1]/sum(coeff_acc, na.rm = T)
-    det_boot[b,2] <- array_score[2]/sum(coeff_rmsps, na.rm = T)
-    det_boot[b,3] <- array_score[3]/sum(coeff_rmsclim, na.rm = T)
+    det_boot[b,1] <- array_score[1]/sum(coeff_acc, na.rm = T) # ACC
+    det_boot[b,2] <- array_score[2]/sum(coeff_rmsps, na.rm = T) # RMSE prevision
+    det_boot[b,3] <- array_score[3]/sum(coeff_rmsclim, na.rm = T) # RMSE climato
   }
-  
+    # naming and saving files
+      # list of bootstrapped values (for statistical tests)
     nom_bootseas <- paste0(indicateur, "scoredet_boot_uerra5.csv")
     save(det_boot, file = file.path(dir_data, "score", nom_bootseas))
     
+      # csv of bootstrap mean values
     det_meanboot <- apply(det_boot, 2, mean, na.rm=T)
-    #colnames(det_meanboot) <- c("msess","acc")
     nom_meanseas <- paste0(indicateur, "detbox_meanboot_uerra5.csv")
     write_csv(as.data.frame(det_meanboot), file.path(dir_data, "score", nom_meanseas))
 
@@ -187,22 +220,25 @@ for (indicateur in indicateurs){
 
 ```
 
+[ optional ]
 
 ## Box score significance test
 
-Wilcoxon test with H0: MSESS non supérieure à 0 + ACC non supérieur à 0.3
+Optional and manual: wilcoxon statistical tests
+Wilcoxon test with H0: ACC not above 0.3 / RMSE(ps)-RMSE(clim) not above 0
 
 ```{r}
-ind <- 2
+
+indicateur <- 2
 
    # season
-  nom_bootseas <- paste0(indicateur, "scoredet_boot.csv")
+  nom_bootseas <- paste0(indicateur, "scoredet_boot_uerra5.csv")
   load(file = file.path(dir_data, "score", nom_bootseas))
 
-  boxboot <- array(unlist(det_boot) , c(2,nboot))
+  boxboot <- array(unlist(det_boot) , c(3,nboot))
   
-  wilcox.test(boxboot[1,], mu = 0, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # msess
-  wilcox.test(boxboot[2,], mu = 0.3, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # acc
+  wilcox.test(boxboot[1,], mu = 0.3, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # ACC
+  wilcox.test(boxboot[2,]-boxboot[3,], mu = 0, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value # comparison RMSE ps and clim
 
 
 ```

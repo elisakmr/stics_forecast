@@ -3,10 +3,9 @@ title: "Probabilistic transformation"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+This code aims at computing respectively probabilistic and binary data from "raw" data (extracted by "extraction") of prevision/climato and reference. 
 
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure"
+```{r setup, include=FALSE}
 
 library(dplyr)
 library(stats)
@@ -20,48 +19,75 @@ library(easyVerification)
 
 ## Parameters 
 
+Some are loaded (because they remain permanent through codes)
+Some are set here and can therefore be modified by user
+
 ```{r}
 
-# temporal aggregation
-temp <- 9:20
+                                     ### SELECTED PARAMETERS (to be set by user) ###
+
+# selected project and directories
+selected_project <- "stics" # stics or season or tree
+dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+# number of cores
+no_core <- 6
 
 # chosen quantile
 kantile <- "ter" # ter or quint
-
-# bootstrap and cores
-no_core <- 6
-nboot <- 100
-
 if (kantile=="quint"){
-  proba = 1:4/5; e = 5
-} else { proba = 1:2/3; e = 3}
+  proba = 1:4/5; events = 5
+} else { proba = 1:2/3; events = 3}
 
-# variables
-indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
-  ### temporalité
-  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
-      temporalite <- "yearly"
-  }else {temporalite <- "quinzaine"}
+
+                                      ### LOADED PARAMETERS (permanent) ###
+
+
+# loading number of bootstrap interations
+load(file = file.path(dir_data, "extract", "nboot.RData"))
+
+# loading variables
+load(file = file.path(dir_data, "extract", "indicateurs.RData"))
+# loading time scales and agregation type
+load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
+load(file = file.path(dir_data, "extract", "time_window.RData")) # if yes which window is selected
+load(file = file.path(dir_data, "extract", "agregation.RData")) # if yes what type of aggregation should be applied
+
+ntemp <- length(temp) # number of elements in time dimension
+
+# loading ensemble members
+load(file = file.path(dir_data, "extract", "runs.RData"))
+nrun <- length(run) # number of members
+
+# loading years
+load(file = file.path(dir_data, "extract", "years.RData"))
+nan <- length(an) # number of years
 
 ```
 
 ## Transforming data 
 
-Regarding 4 selected events (higher/lower tercile/quintile) reference continuous values are transformed into binary values; ensemble prevision values are transformed into probabilistic values (computed from the ensemble spread). 
+Regarding selected event (tercile/quintile) reference continuous values are transformed into binary values; ensemble prevision and climatology values are transformed into probabilistic values (computed from ensemble members)
 
 ```{r}
 
-tictoc::tic()
+tictoc::tic() # timer on
 
 load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
 
 for (indicateur in indicateurs){
   
-  cl <- makeCluster(no_core)
-  registerDoParallel(cl)
+  d <- which(indicateurs==indicateur)
+  temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+  agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
 
-foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstrap samples
+cl <- makeCluster(no_core) # setting up number of cores
+registerDoParallel(cl) # parallelizing on them
 
+foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # for-loop parallelized
+  
+  # loading "raw" data
   nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
   load(file = file.path(dir_data, "extract", nom_ref))
   nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
@@ -71,26 +97,36 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstra
 
   ngrids <- dim(array_obs)[1]
 
-  if (temporalite=="yearly"){
+  # time aggregation
+  if (temporalite=="single"){
     int_obs <- array_obs 
     int_prev <- array_prev
     int_clim <- array_clim
-  } else if (temporalite=="quinzaine") {
-    int_obs <- apply(array_obs[,,temp],c(1,2), sum) ### warning !!!!!! MEAN OR SUM REGARDING INDIC ############
+  } else if (temporalite=="multi") {
+    if (agreg=="sum"){
+    int_obs <- apply(array_obs[,,temp],c(1,2), sum) 
     int_prev <- apply(array_prev[,,,temp],c(1,2,3), sum)
     int_clim <- apply(array_clim[,,,temp],c(1,2,3), sum)
+    } else if (agreg=="mean"){
+    int_obs <- apply(array_obs[,,temp],c(1,2), mean) 
+    int_prev <- apply(array_prev[,,,temp],c(1,2,3), mean)
+    int_clim <- apply(array_clim[,,,temp],c(1,2,3), mean)
+    }
   }
   
-  bin_ref <- array (NA, dim=c(ngrids,nan,e))
-  prob_ps <- array (NA, dim=c(ngrids,nan,e))
-  prob_clim <- array (NA, dim=c(ngrids,nan,e))
+  # setting up arrays for data to be stored in
+  bin_ref <- array (NA, dim=c(ngrids,nan,events))
+  prob_ps <- array (NA, dim=c(ngrids,nan,events))
+  prob_clim <- array (NA, dim=c(ngrids,nan,events))
   
+  # using for-loop on grids, probabilistic values are derived using two nested functions from EasyVerification
   for (i in 1:ngrids){
     bin_ref[i,,] <- count2prob(convert2prob(int_obs[i,], prob = proba), type = 4)
     prob_ps[i,,] <- count2prob(convert2prob(int_prev[i,,], prob = proba), type = 4)
     prob_clim[i,,] <- count2prob(convert2prob(int_clim[i,,], prob = proba), type = 4)
   }
-    
+  
+  # naming and saving files
   nom_prev <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")
   nom_clim <- paste0(indicateur,b,"climprob_uerra5",kantile, ".RData")
   nom_ref <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
@@ -102,6 +138,6 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # loop on bootstra
  
   }
 
-tictoc::toc()
+tictoc::toc() # timer off
 
 ```

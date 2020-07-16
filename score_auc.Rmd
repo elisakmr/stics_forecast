@@ -2,11 +2,11 @@
 title: "Area under ROC"
 output: html_document
 ---
+The code aims at computing probabilistic scores, being Area Under Curve of the first and last quantile, Brier scores + skills scores of the first and last quantile as well.
+It is computed for prevision only, except Brier skill score which compare ps and climato: BSS = 1-BS(ps)/BS(clim)
+This requires both "raw" data extracted by "extraction" and  probabilistic data computed by "transfo_probin"
 
 ```{r setup, include=FALSE}
-
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(easyVerification)
 library(verification)
@@ -25,24 +25,51 @@ library(purrr)
 
 ## Parameters 
 
+Some are loaded (because they remain permanent through codes)
+Some are set here and can therefore be modified by user
+
 ```{r }
 
-# temporal agregation
-temp <- 9:20
+                                     ### SELECTED PARAMETERS (to be set by user) ###
+
+# selected project and directories
+selected_project <- "stics" # stics or season or tree
+dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+# number of cores
+no_core <- 6
 
 # chosen quantile
 kantile <- "ter" # ter or quint
-
-# bootstrap and cores
-no_core <- 6
-nboot <- 100
-
 if (kantile=="quint"){
   proba = 1:4/5; events = 5
 } else { proba = 1:2/3; events = 3}
 
-# variables
-indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
+
+                                      ### LOADED PARAMETERS (permanent) ###
+
+
+# loading number of bootstrap interations
+load(file = file.path(dir_data, "extract", "nboot.RData"))
+
+# loading variables
+load(file = file.path(dir_data, "extract", "indicateurs.RData"))
+# loading time scales and agregation type
+load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
+load(file = file.path(dir_data, "extract", "time_window.RData")) # if yes which window is selected
+load(file = file.path(dir_data, "extract", "agregation.RData")) # if yes what type of aggregation should be applied
+
+ntemp <- length(temp) # number of elements in time dimension
+
+# loading ensemble members
+load(file = file.path(dir_data, "extract", "runs.RData"))
+nrun <- length(run) # number of members
+
+# loading years
+load(file = file.path(dir_data, "extract", "years.RData"))
+nan <- length(an) # number of years
+
 
 
 ```
@@ -50,8 +77,7 @@ indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C
 ## Gridded scores
 
 Scores computed for each grid separately.
-Indicators are assessed on a 28 days time window and over the whole season
-
+They are stored in an array, in the following order(on the 2nd dimension):
 1: roc quant1
 2: roc last quant
 3: brier quant1
@@ -61,21 +87,20 @@ Indicators are assessed on a 28 days time window and over the whole season
 
 ```{r}
 
-tictoc::tic()
+tictoc::tic() # start timer
 
 for (indicateur in indicateurs){
   
-  # temporalité
-  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
-      temporalite <- "yearly"
-  }else {temporalite <- "quinzaine"}
+  d <- which(indicateurs==indicateur)
+  temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+  agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
 
-  cl <- makeCluster(no_core)
-  registerDoParallel(cl)
+cl <- makeCluster(no_core) # setting up number of cores
+registerDoParallel(cl) # parallelizing on them
 
-foreach(b=1:nboot, .packages = c('easyVerification', 's2dverification'), .combine=rbind) %dopar%  { # loop on bootstrap samples
+foreach(b=1:nboot, .packages = c('easyVerification', 's2dverification'), .combine=rbind) %dopar%  { # for-loop parallelized
 
-
+  # loading "raw" and probabilistic data
   nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
   nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
   nom_prev_prob <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")    
@@ -89,62 +114,75 @@ foreach(b=1:nboot, .packages = c('easyVerification', 's2dverification'), .combin
   load(file = file.path(dir_data, "extract", nom_ref_bin))
   
   
-  ngrids <- dim(array_obs)[1]
-  scoreprob <- array (NA, dim=c(ngrids,6))
+  ngrids <- dim(array_obs)[1] # nomber of grids
+  scoreprob <- array (NA, dim=c(ngrids,6)) # array for scores to be stored in
   rapport_climps1 <- vector()
   rapport_climps2 <- vector()
   
-  
-  if (temporalite=="yearly"){
+  # time aggregation
+  if (temporalite=="single"){
     seas_obs <- array_obs
     seas_prev <- array_prev
-  } else if (temporalite=="quinzaine") {
+  } else if (temporalite=="multi") {
     seas_obs <- array()
     seas_prev <- array()
-    seas_obs <- apply(array_obs[,,temp],c(1,2), sum)# seasonal: WARNING WITH AGREGATION METHOD!!!!
-    seas_prev <- apply(array_prev[,,,temp],c(1,2,3), sum)
-    
+    if (agreg=="sum"){
+    seas_prev <- apply(array_prev[,,,temp], c(1,2,3), sum) 
+    seas_obs <- apply(array_obs[,,temp], c(1,2), sum)
+    } else if (agreg=="mean"){
+    seas_prev <- apply(array_prev[,,,temp], c(1,2,3), mean) 
+    seas_obs <- apply(array_obs[,,temp], c(1,2), mean)
+    }
   }
   
+  # Area Under Curve
   scoreprob[,1] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat1 
   
+  # regardin selected quantile, index of the upper one change (5 for quintile, 3 for tercile) 
   if (kantile=="quint"){
     scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat5
   } else { scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat3 }
 
+  # loop needed for Brierscore function, as veriapply doesn't work on parallelized loop
   for (i in 1:ngrids){
+    # Brier score
   scoreprob[i,3] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs
+    # intermediate for Brier skill score
   rapport_climps1[i] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs/BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_clim[i,,1])))$bs
   
-
+    # Brier score
   scoreprob[i,5] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs
+    # intermediate for Brier skill score
   rapport_climps2[i] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs/BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_clim[i,,events])))$bs
   
   }
+  # Brier skill score
   scoreprob[,4] <- 1-rapport_climps1
   scoreprob[,6] <- 1-rapport_climps2
+  # naming file
   nom_scoreroc <- paste0(indicateur, b, "_", kantile, "aucgrid_uerra5.RData")
-
+  # naming file
   save(scoreprob, file = file.path(dir_data, "score", nom_scoreroc))
 
   }
   
-stopCluster(cl)
+stopCluster(cl) # stop parallelizing
 
 }
 
-tictoc::toc()
+tictoc::toc() # stop timer
 
 
 ```
 
 ## Box-agregated scores
 
-Aggregation computed using latitude weighting   
+We compute AUC and Brier score at box level, using manual functions defined in "functions"
+It requires probabilistic data computed in "transfo_probin"
 
 ```{r}
 
-tictoc::tic()
+tictoc::tic() # timer on
 
 for (indicateur in indicateurs){
 
@@ -154,8 +192,9 @@ for (indicateur in indicateurs){
   load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
   ngrids <- length(lat)
 
-  for (b in 1:nboot){
+  for (b in 1:nboot){ 
     
+    # loading probabilistic data
     nom_prev <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")    
     nom_ref <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
     load(file = file.path(dir_data, "extract", nom_prev))
@@ -163,48 +202,50 @@ for (indicateur in indicateurs){
     
     int_auc <- vector()
     int_brier <- vector()
-    for (e in c(1:events)){ # through different quantiles
+    for (e in c(1:events)){ # events are different quantiles
       
-      int_auc[e] <- score_boite_prob(prob_ps, bin_ref, lat, nb_bin = 10, e)$AUC # seasonal 
-      int_brier[e] <- brier_score_boite(prob_ps, bin_ref, lat, e) # seasonal 
+      int_auc[e] <- score_boite_prob(prob_ps, bin_ref, lat, nb_bin = 10, e)$AUC # auc 
+      int_brier[e] <- brier_score_boite(prob_ps, bin_ref, lat, e) # brier  
   
       }
- 
+   # we save them in lists to keep all bootstrapped score
    auc_boot[[b]] <- int_auc 
    brier_boot[[b]] <- int_brier 
   
   }
- 
-  nom_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
-  save(auc_boot, file = file.path(dir_data, "score", nom_box))
+  #naming and saving auc list 
+  auc_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
+  save(auc_boot, file = file.path(dir_data, "score", auc_box))
 
+  #naming and saving brier list 
   brier_box <- paste0(indicateur, "_", kantile, "boxbrier_uerra5.RData")
   save(brier_boot, file = file.path(dir_data, "score", brier_box))
   
 }
 
-tictoc::toc()
+tictoc::toc() # timer off
 
 ```
 
 
 ## Box-agregated score analysis
 
-Transform lists in a more handy format
+From lists generated before, we create and save a csv with bootstrapped score mean (for box score only)
 
 ```{r}
 
 for (indicateur in indicateurs){
-  
-   # season
+  # loading list files
   nom_auc <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
   load(file = file.path(dir_data, "score", nom_auc))
   nom_brier <- paste0(indicateur, "_", kantile, "boxbrier_uerra5.RData")
   load(file = file.path(dir_data, "score", nom_brier))
   
+  # averaging list
   sum_aucbox <- apply(array(unlist(auc_boot) , c(events,nboot)), 1, mean, na.rm = T)
   sum_brierbox <- apply(array(unlist(brier_boot) , c(events,nboot)), 1, mean, na.rm = T)
   
+  # naming and saving files
   nom_aucav <- paste0(indicateur, "_", kantile, "avboxauc_uerra5.csv")
   write_csv(as.data.frame(sum_aucbox), file.path(dir_data, "score", nom_aucav))
   nom_brierav <- paste0(indicateur, "_", kantile, "avboxbrier_uerra5.csv")
@@ -214,22 +255,28 @@ for (indicateur in indicateurs){
 
 ```
 
+[ optional ]
+
 ## Box score significance test
 
-Wilcoxon test with H0: AUC non supérieure à 0.5
+Optional and manual: wilcoxon statistical tests
+Wilcoxon test with H0: AUC not above 0.5 / to be defined for Brier score
 
 ```{r}
-indicateur <- "bilanhydr"
-indicateur <- "grassyieldC1C2_"
-lastquant <- 3 # 3 if terciles or 5
+indicateur <- "bilanhydr" # to be selected by user
+lastquant <- 3 # 3 if terciles, 5 if quintile
 
+  # loading list of box scores
   nom_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
   load(file = file.path(dir_data, "score", nom_box))
   
   boxboot <- array(unlist(auc_boot) , c(events,nboot))
   
-   wilcox.test(boxboot[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
-   wilcox.test(boxboot[lastquant,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
+  # testing 1st quantile
+  wil_first <- wilcox.test(boxboot[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
+  # testing last quantile
+  wil_last <- wilcox.test(boxboot[lastquant,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
 
+  return(wil_first, wil_last)
 
 ```

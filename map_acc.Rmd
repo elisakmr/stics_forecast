@@ -2,11 +2,9 @@
 title: "Mapping ACC"
 output: html_document
 ---
+The code creates a map of ACC score on a selected variable. It requires scores computed in "score_deterministic". Signficance of the score is represented with dots.
 
 ```{r setup, include=FALSE}
-
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(maps)
 library(nnet)
@@ -30,55 +28,89 @@ library(ggnewscale)
 
 ## Parameters 
 
+Some are loaded (because they remain permanent through codes)
+Some are set here and can therefore be modified by user
+
 ```{r setup, include=FALSE}
 
-# variables
-indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
-indicateur <- indicateurs[5]
+                                     ### SELECTED PARAMETERS (to be set by user) ###
 
-# score value interval
+# selected project and directories
+selected_project <- "stics" # stics or season or tree
+dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+# selecting variable of interest
+load(file = file.path(dir_data, "extract", "indicateurs.RData"))
+indicateur <- indicateurs[3]
+
+# time integration
+scale <- " MJJASO"
+
+# score value interval: to be modified, especially if all grids are black, it means they're out of range
 acc_limits <- c(-1,1)
 
-# color palette for msess score
+# error limit
+na_limit <- 10
+
+# color palette for acc score
 score_palette <- c("#ca0020", "#f4a582", "#f7f7f7", "#92c5de", "#0571b0")
 
 # !! DO NOT MODIFY !! one color palette for signifiance plotting  
 sign_palette <- c("black", "black")
 
-# bootstrap and cores
-nboot <- 100
+                                      ### LOADED PARAMETERS (permanent) ###
+
+
+# trick to get automatically number of grids 
+nom_ref <- paste0(indicateur,1,"_ref_uerra5.RData")
+load(file = file.path(dir_data, "extract", nom_ref))
+ngrids <- dim(array_obs)[1]
+
+# grid size (depending on the zoom)
+if (selected_project=="season"|selected_project=="tree"){
+  grid_size <- 0.85
+} else if (selected_project=="stics"){
+  grid_size <- 2.15
+}
+
+# background map
+key = "AIzaSyCD2-pP0yfM8aC8sjCB4g--CaCcExP6NhU"; "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA"
+register_google(key = "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA")
+if (selected_project=="season"|selected_project=="tree"){
+    back_map <- get_map(location = c(1.2, 41, 10, 46), maptype = "satellite", source = "google") 
+} else if (selected_project=="stics"){
+    back_map <- get_map(location = c(4, 43.1, 5.7, 44), maptype = "satellite", source = "google") 
+}
 
 ```
 
 
-## Mapping MSESS through a shapefile
+## Creating map through shapefile and ggplot2 package
 
-We transform the array of scores into a shapefile containing gridded score values and their significance.
-Significance is computed using Wilcoxon's test (H0: mean value not above 0) on bootstrapped score values.
+We transform arrays of scores into a shapefile containing gridded score values (averaged over bootstrap) and their significance.
+Significance is computed using Wilcoxon's test (H0: mean acc value not above 0.3) on bootstrapped score values.
 
 ```{r }
 
-### BUIDLING SHAPEFILE OF MEAN MSESS VALUES AND THEIR SIGNIFICANCE ###
+                # BUIDLING SHAPEFILE OF MEAN ACC VALUES AND THEIR SIGNIFICANCE #
 
-  ## extracting bootstrapped msess values
+  # extracting bootstrapped acc values
 
-nom_ref <- paste0(indicateur,1,"_ref_uerra5.RData")
-load(file = file.path(dir_data, "extract", nom_ref))
-
-  ngrids <- dim(array_obs)[1]
+# setting up arrays for all bootstrapped scores to be stored in
 
 score_ps <- array(NA, dim=c(ngrids, 3, nboot)) 
 
+# loading data and filling up the array just set
   for (b in 1:nboot)  { 
   
     nom_det <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
     load(file = file.path(dir_data, "score", nom_det))
 
     score_ps[,,b] <- score_det[,]
-
   }
 
-  ## we build a matrix gathering all info needed for the shapefile:
+  # building up matrix gathering all info needed for the shapefile:
 
     # coordinates
 
@@ -87,22 +119,22 @@ load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
   
 ngrids <- dim(score_det)[1]
 
-matrix4shp <- matrix(0, nrow = ngrids, ncol = 4) # col: skill score, significant, lat, lon 
+matrix4shp <- matrix(0, nrow = ngrids, ncol = 4) # col: score, significant, lat, lon 
 matrix4shp[,3] <- lat
 matrix4shp[,4] <- lon
   
     # mean skill and wilcoxon test outcome
 
 matrix4shp[,2] <- rep(0, ngrids) # signficance: 0 everywhere first, will switch to 1 if positive statistical test outcome
-matrix4shp[,1] <- apply(score_ps[,1,], 1, mean, na.rm = TRUE) #  mean of bootstrapped MSESS  
+matrix4shp[,1] <- apply(score_ps[,1,], 1, mean, na.rm = TRUE) #  mean of bootstrapped ACC  
 
     # Wilcoxon test
 
 for (i in 1:ngrids)  { 
-  if (length(which(is.na(score_ps[i,1,]))) >= 10) {matrix4shp[i,2] <- 0; matrix4shp[i,1] <- NA}
-  else { wmsess <- wilcox.test(score_ps[i,1,], mu = 0.3, alternative = "greater", conf.level = 0.95) # h0 represented by "mu = 0.3" & "alternative = greater", alternative being h1
+  if (length(which(is.na(score_ps[i,1,]))) >= na_limit) {matrix4shp[i,2] <- 0; matrix4shp[i,1] <- NA}
+  else { wacc <- wilcox.test(score_ps[i,1,], mu = 0.3, alternative = "greater", conf.level = 0.95) # h0 represented by "mu = 0.3" & "alternative = greater", alternative being h1
 
-    if (wmsess$p.value < 0.05) { # p value de 5%
+    if (wacc$p.value < 0.05) { # p value de 5%
     matrix4shp[i,2] <- 1 # 1 = test validé, 0 = non validé (voir plus haut)
     }
   }
@@ -118,16 +150,18 @@ shp_grid <- st_as_sf(df_shp) # we transform spatial data frame into shapefile, w
 shp_grid$significance[which(shp_grid$significance==0)] <- NA # to help plotting, we set significance as NA instead of 0
 
 
-### MAPPING WITH GGPLOT2 ###
+
+                                      # MAPPING WITH GGPLOT2 #
+
 
 ggmap(back_map) +
-geom_sf(data = shp_grid, aes(color = acc), size=2.15, shape = 15) + 
+geom_sf(data = shp_grid, aes(color = acc), size=grid_size, shape = 15) + 
   scale_color_gradientn(colours=score_palette, limits = acc_limits, na.value = "black", guide = guide_colorbar(barwidth = 10, barheight = 0.5, nbin = 5)) +
 new_scale("color")+
 geom_sf(data = shp_grid, aes(color = significance), shape = 3, size = 0.15, show.legend = FALSE) +
   scale_color_gradientn(colours=sign_palette, na.value = "transparent")+
 theme(legend.direction = "horizontal", legend.position = "right", legend.title = element_text(),  
       plot.title = element_text(size = 12, hjust = 0, vjust = 1.5)) + 
-  labs(title = paste0(indicateur," MJJASO acc "))
+  labs(title = paste0(indicateur,scale," acc "))
 
 ```

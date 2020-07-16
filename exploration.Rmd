@@ -2,11 +2,10 @@
 title: "Exploration"
 output: html_document
 ---
+The code aims at creating 2 types of plot for data visualisation
+It requires data extracted by "extraction"
 
 ```{r setup, include=FALSE}
-
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
 
 library(s2dverification)
 library(stats)
@@ -21,50 +20,81 @@ library(ggfan)
 
 ## Parameters 
 
+Some are loaded (because they remain permanent through codes)
+Some are set here and can therefore be modified by user
+
 ```{r }
 
-# variable
-indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass", "yieldgrassC2C3")
-indicateur <- indicateurs[5]
-  ### temporalité
-  if (indicateur=="yieldwheat"|indicateur=="yieldgrass"|indicateur=="yieldgrassC2C3"){
-      temporalite <- "yearly"
-  }else {temporalite <- "quinzaine"}
-  
-# grid
+                                     ### SELECTED PARAMETERS (to be set by user) ###
+
+
+# selected project and directories
+selected_project <- "tree" # stics or season or tree
+dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
+dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+
+# selecting variable of interest
+load(file = file.path(dir_data, "extract", "indicateurs.RData"))
+indicateur <- indicateurs[3]
+
+# selecting grid of interest (for second plot)
 maille <- 4
 
-# temporal aggregation
-temp <- 9:20 
+# naming time integration - depends on time_windows (for plot titles)
+scale <- " MJJASO"
 
-# bootstrap and cores
-no_core <- 6
-nboot <- 100
 
-# trick to get automatically number of grids 
-nom_ref <- paste0(indicateur,1,"_ref_uerra5.RData")
-load(file = file.path(dir_data, "extract", nom_ref))
-ngrids <- dim(array_obs)[1]
+                                      ### LOADED PARAMETERS (permanent) ###
 
+
+# loading number of bootstrap interations
+load(file = file.path(dir_data, "extract", "nboot.RData"))
+
+# loading time scales and agregation type
+load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
+load(file = file.path(dir_data, "extract", "time_window.RData")) # if yes which window is selected
+load(file = file.path(dir_data, "extract", "agregation.RData")) # if yes what type of aggregation should be applied
+ntemp <- length(temp) # number of elements in time dimension
+
+# loading ensemble members
+load(file = file.path(dir_data, "extract", "runs.RData"))
+nrun <- length(run) # number of members
+
+# loading years
+load(file = file.path(dir_data, "extract", "years.RData"))
+nan <- length(an) # number of years
+
+ 
 ```
 
 ## Retrieving original data set
 
-we have to do a trick to find out the first bootstrapped iteration and the run index whithin this iteration matching the year we are interested in (the random sampling doesn't respect chronology)
+To explore original data we need to reshape it, because bootstrap has modified year order (random sampling doesn't respect chronology).
 
 ```{r }
 
-                                            ### WITH TIME DIMENSION ###
-if (temporalite=="quinzaine"){
+  d <- which(indicateurs==indicateur)
+  temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+  agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
+  
+  # getting number of grids automatically
+  load(file = file.path(dir_data, "extract", paste0(indicateur, "_lon.RData")))
+  ngrids <- length(lon)
+  
 
+                                            ### WITH TIME DIMENSION ###
+  
+if (temporalite=="multi"){
+  
+# creating arrays for original data to be stored in
 ps_original <- array(NA, dim=c(ngrids, nan, nrun, ntemp))
 ref_original <- array(NA, dim=c(ngrids, nan, ntemp))
 
  for (year in an){
  y <- which(an==year)
 
-       # bootstrap iteration index of the year selected
-    load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
+    # loading list of bootstrapped years 
+    load(file = file.path(dir_data, "extract", "rand_years.RData")) 
      
     list_match <- lapply(rand_year, function(x) which(year == x)) # list of matchs between list of years randomly generated for the bootstrap and the year we are interested in
      
@@ -75,20 +105,26 @@ ref_original <- array(NA, dim=c(ngrids, nan, ntemp))
        else {y_index <- y_index; b_index <- b_index}
      }
      
+  # loading ps bootstrapped years
   nom_prev <- paste0(indicateur,b_index,"_prev_uerra5.RData")
   load(file = file.path(dir_data, "extract", nom_prev))
+  # we reshape data following original chronology
   ps_original[,y,,] <- array_prev[,y_index[1],,temp]
   
+  # loading ps bootstrapped years
   nom_ref <- paste0(indicateur,b_index,"_ref_uerra5.RData")
   load(file = file.path(dir_data, "extract", nom_ref))
+  # we reshape data following original chronology
   ref_original[,y,] <- array_obs[,y_index[1],temp]
 }
 
 
                                             ### WITHOUT TIME DIMENSION ###
-} else if (temporalite=="yearly"){
+# same as before, without the time dimension
 
+} else if (temporalite=="single"){
 
+# creating arrays for original data to be stored in
 ps_original <- array(NA, dim=c(ngrids, nan, nrun))
 ref_original <- array(NA, dim=c(ngrids, nan))
 
@@ -120,26 +156,40 @@ ref_original <- array(NA, dim=c(ngrids, nan))
 ```
 
 ## Data aggregation
-We compute temporal and ensemble aggregation: temporal can be a mean or a sum - ensemble mean always
+
+We compute temporal and ensemble aggregation needed for the plots
+- grid means are needed for boxplot
+- ensemble means are needed for the probabilistic plot
 
 ```{r }
-                                            ### WITH TIME DIMENSION ###
-if (temporalite=="quinzaine"){
 
-ps_agreg <- apply(ps_original[,,,], c(1,2,3), sum)
+
+                                            ### WITH TIME DIMENSION ###
+if (temporalite=="multi"){
+      if (agreg=="sum"){
+      ps_agreg <- apply(ps_original[,,,], c(1,2,3), sum)
+      ref_agreg <- apply(ref_original[,,], c(1,2), sum)
+      } else if (agreg=="mean"){
+      ps_agreg <- apply(ps_original[,,,], c(1,2,3), mean)
+      ref_agreg <- apply(ref_original[,,], c(1,2), mean)
+      }
+      
 ps_gridmean <- apply(ps_agreg, c(2,3), mean)
 ps_ensmean <- apply(ps_agreg, c(1,2), mean)
 ps_original <- ps_agreg
-ref_agreg <- apply(ref_original[,,], c(1,2), sum)
 ref_gridmean <- apply(ref_agreg, 2, mean)
 ref_original <- ref_agreg
+
+
+
                                             ### WITHOUT TIME DIMENSION ###
-} else if (temporalite=="yearly"){
+} else if (temporalite=="single"){
 
 ps_gridmean <- apply(ps_original, c(2,3), mean)
 ps_ensmean <- apply(ps_original, c(1,2), mean)
 ref_gridmean <- apply(ref_original, 2, mean)
 }
+
 ```
 
 ## Nuage de points
@@ -159,18 +209,15 @@ for (y in 1:nan){
 }
 
 df_raw$year <- as.factor(df_raw$year)
+
 # plotting with ggplot2
 
-ggplot() + geom_boxplot(df_raw %>% filter(type=="prevision"), mapping=aes(x=year, y=value), color="#dd1c77")+
+ggplot() + geom_boxplot(df_raw %>% filter(type=="prevision"), mapping=aes(x=year, y=value), color="#dd1c77", show.legend = TRUE)+
   geom_point(df_raw %>% filter(type=="ref"), mapping=aes(x=year, y=value), color="#2ca25f")+
   #scale_colour_manual(name="Error Bars",values=cols) + scale_fill_manual(name="Bar",values=cols)
-  labs(title = paste0(indicateur, " MJJASO spatial means"), x="Year", y= "Value")+
+  labs(title = paste0(indicateur, scale, " spatial means"), x="Year", y= "Value")+
       theme_bw()+
        scale_x_discrete(breaks = scales::pretty_breaks(n = 12))
-
-
-# value of global difference
-#df_raw %>% group_by(type) %>% summarise(mean_ps=mean(value))
 
 ```
 
@@ -200,7 +247,7 @@ ter3_ps <- as.numeric(quantile(ps_original[maille,,], probs = 2/3))
 
 # plot with ggplot2
 p <- ggplot(df_quant, aes(x=year, y=value)) + 
-  labs(title = paste0(indicateur, " MJJASO grid ", maille), x="Year", y= "Value")+
+  labs(title = paste0(indicateur, scale, " grid ", maille), x="Year", y= "Value")+
       theme_bw()+
        scale_x_continuous(breaks = scales::pretty_breaks(n = 12))
 

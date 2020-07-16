@@ -2,25 +2,21 @@
 title: "Functions"
 output: html_document
 ---
+This code sets up manual functions used in other codes of the project. It needs to be run once for functions to be used in other codes
 
 ```{r setup, include=FALSE}
-
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure"
 
 library(dplyr)
 library(stats)
 
-functioning <- function(x,y){
-  veriApply("BrierScore2", x, y)$bs
-}
-
 ```
 
 ## ROC aggregated at box level
-# function computing scores for the box, weighting points as function of latitude
+
+Computing Area Under Curve for the whole box, weighting points as function of latitude
 
 ```{r setup, include=FALSE}
+
 score_boite_prob = function(prev_prob, obs_bin, lati, nb_bin, e)
 {
   # Calcul de HR et FAR pour scores ROC et diag de fiabilite sur des zones.
@@ -72,18 +68,10 @@ score_boite_prob = function(prev_prob, obs_bin, lati, nb_bin, e)
 }
 ```
 
-## Background map
-
-```{r setup, include=FALSE}
-
- key = "AIzaSyCD2-pP0yfM8aC8sjCB4g--CaCcExP6NhU"; "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA"
- register_google(key = "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA")
- back_map <- get_map(location = c(1.2, 41, 10, 46), maptype = "satellite", source = "google") 
-
-```
 
 ## BRIER score aggregated at box level
-# function computing scores for the box, weighting points as function of latitude
+
+Computing Brier score for the whole box, weighting points as function of latitude
 
 ```{r setup, include=FALSE}
 
