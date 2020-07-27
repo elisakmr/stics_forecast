@@ -11,7 +11,7 @@ library(stats)
 
 ```
 
-## ROC aggregated at box level
+## AREA UNDER ROC aggregated at box level
 
 Computing Area Under Curve for the whole box, weighting points as function of latitude
 
@@ -79,20 +79,86 @@ brier_score_boite = function(prev_prob, obs_bin, lati, e){
   
   coeff_lat <- vector()
   somme <- 0
+  
    for (i in (1:ngrids)) {
      int = sum(cos(pi*lati[i]/180)*(prev_prob[i,,e]-obs_bin[i,,e])^2)
+     if (is.na(int)==TRUE){
+     coeff_lat[i] <- NA
+     somme <- somme
+     }else {
      somme=somme+int
      coeff_lat[i] <- cos(pi*lati[i]/180)
+     }
       
    }
   
-  bs=somme/(sum(24*coeff_lat))
+  bs=somme/(sum(24*coeff_lat, na.rm = TRUE))
   return(bs)
 }
 
-brier_score_boite(prob_ps, bin_ref, lat, 1)
+```
+
+
+## ANOMALY CORRELATION COEFFICIENT aggregated at box level
+
+Computing ACC for the whole box, weighting points as function of latitude
+
+```{r setup, include=FALSE}
+
+ACC_boite = function(anomaly_prev, anomaly_obs, lati){
+  
+  coeff_lat <- vector()
+  numerateur <- 0
+  denominateur <- 0
+  ngrids <- dim(anomaly_prev)[1]
+   for (i in (1:ngrids)) {
+     int1 = sum(cos(pi*lati[i]/180)*anomaly_prev[i,]*anomaly_obs[i,])
+     int2 = sqrt(sum(cos(pi*lati[i]/180)*(anomaly_prev[i,])^2)*sum(cos(pi*lati[i]/180)*(anomaly_obs[i,])^2))
+     if (is.na(int1)==TRUE){
+     numerateur=numerateur
+     denominateur=denominateur
+     }else {
+     numerateur=numerateur+int1
+     denominateur=denominateur+int2
+    }
+
+   }
+  
+  acc=numerateur/denominateur
+  return(acc)
+}
+
 
 ```
 
+
+## ROOT MEAN SQUARE ERROR aggregated at box level
+
+Computing ACC for the whole box, weighting points as function of latitude
+
+```{r setup, include=FALSE}
+
+RMSE_boite = function(prev, obs, lati){
+  
+  coeff_lat <- vector()
+  sqrsum <- 0
+  ngrids <- dim(prev)[1]
+  
+   for (i in (1:ngrids)) {
+     int <- sum(cos(pi*lati[i]/180)*(prev-obs)^2)
+     if (is.na(int)==TRUE){
+       sqrsum <- sqrsum
+       coeff_lat[i] <- NA
+     } else { 
+       sqrsum <- sqrsum + int
+       coeff_lat[i] <- cos(pi*lati[i]/180)
+           }
+   }
+  
+  rmse = sqrt(sqrsum)/sqrt(sum(coeff_lat, na.rm=TRUE)*24)
+  return(rmse)
+}
+
+```
 
 

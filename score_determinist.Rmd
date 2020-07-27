@@ -2,7 +2,7 @@
 title: "Deterministic scores"
 output: html_document
 ---
-The code aims at computing deterministic scores, being Anomaly Correlation Coefficient, and Root Mean Square Error, for ps (and climato for rmse only).
+The code aims at computing deterministic scores, being Anomaly Correlation Coefficient, and Root Mean Square Error, for ps and climato.
 ACC requires anomaly arrays, computed in "anomaly" 
 
 ```{r setup, include=FALSE}
@@ -71,7 +71,8 @@ Scores computed for each grid separately, using "EasyVerification" package
 
 tictoc::tic() # start timer
 
-acc <- vector()
+acc_ps <- vector()
+acc_clim <- vector()
 rmse_ps <- vector()
 rmse_clim <- vector()
 
@@ -94,17 +95,19 @@ registerDoParallel(cl) # parallelizing on them
     nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
     nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
     nom_an_prev <- paste0(indicateur,b,"_anomaly_prev_uerra5.RData")
+    nom_an_clim <- paste0(indicateur,b,"_anomaly_clim_uerra5.RData")
     nom_an_obs <- paste0(indicateur,b,"_anomaly_obs_uerra5.RData")
     
     load(file = file.path(dir_data, "extract", nom_ref))
     load(file = file.path(dir_data, "extract", nom_prev))
     load(file = file.path(dir_data, "extract", nom_clim))
     load(file = file.path(dir_data, "extract", nom_an_prev))
+    load(file = file.path(dir_data, "extract", nom_an_clim))
     load(file = file.path(dir_data, "extract", nom_an_obs))
     
     ngrids <- dim(array_obs)[1]
     # setting up array for scores to be stored in
-    det_seas <- array(NA, dim = c(ngrids,3))
+    det_seas <- array(NA, dim = c(ngrids,4))
     
   # time aggregation if the time dimension is "multi" 
   if (temporalite=="single"){
@@ -132,10 +135,11 @@ registerDoParallel(cl) # parallelizing on them
           
       # ACC #
     
-    acc <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly, parallel = TRUE)
+    acc_ps <- veriApply("EnsCorr", fcst=prev_anomaly, obs=obs_anomaly, parallel = TRUE)
+    acc_clim <- veriApply("EnsCorr", fcst=clim_anomaly, obs=obs_anomaly, parallel = TRUE)
     
     # storing scores
-    score_det <- array(c(acc, rmse_ps, rmse_clim), dim=c(ngrids,3))
+    score_det <- array(c(acc_ps, acc_clim, rmse_ps, rmse_clim), dim=c(ngrids,4))
     # file naming 
     nom_det <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
     # file saving 
@@ -161,50 +165,62 @@ It computes ACC and RMSE score at box level, by averaging grid scores with latit
 
 coeff_rmsps <- vector()
 coeff_rmsclim <- vector()
-coeff_acc <- vector()
+coeff_psacc <- vector()
+coeff_climacc <- vector()
 
-for (indicateur in indicateurs){
+for (indicateur in indicateurs) {
 
   # loading latitude
   load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
 
   det_boot <- data.frame()
 
-  for(b in 1:nboot)   {
+  for(b in 1:nboot) {
     
-    # loading gridded scores
-    nom_prevseas <- paste0(indicateur, b,"scoredet_grid_uerra5.RData")
-    load(file = file.path(dir_data, "score", nom_prevseas))
-    ngrids <- dim(score_det)[1]
-
-    val_prevseas <- list()
-   # computed weighted value and saving all coefficient in a vector
-    for (i in 1:ngrids){
-      val_prevseas[[i]] <- score_det[i,]*cos(pi*lat[i]/180)
-      coeff_rmsps[i] <- cos(pi*lat[i]/180)
-      coeff_rmsclim[i] <- cos(pi*lat[i]/180)
-      coeff_acc[i] <- cos(pi*lat[i]/180)
-      
-     # removing NAs
-      if (is.na(score_det[i,1])==TRUE){
-        coeff_acc[i] <- NA
-      }
-      
-      if (is.na(score_det[i,2])==TRUE){
-        coeff_rmsps[i] <- NA
-      }
-      
-      if (is.na(score_det[i,3])==TRUE){
-        coeff_rmsclim[i] <- NA
-      }
-
-          }
+    # loading 
+    nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
+    nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
+    nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
+    nom_an_prev <- paste0(indicateur,b,"_anomaly_prev_uerra5.RData")
+    nom_an_clim <- paste0(indicateur,b,"_anomaly_clim_uerra5.RData")
+    nom_an_obs <- paste0(indicateur,b,"_anomaly_obs_uerra5.RData")
     
+    load(file = file.path(dir_data, "extract", nom_ref))
+    load(file = file.path(dir_data, "extract", nom_prev))
+    load(file = file.path(dir_data, "extract", nom_clim))
+    load(file = file.path(dir_data, "extract", nom_an_prev))
+    load(file = file.path(dir_data, "extract", nom_an_clim))
+    load(file = file.path(dir_data, "extract", nom_an_obs))
+
+
+  # time aggregation if the time dimension is "multi" 
+  if (temporalite=="single"){
+    prev_seas <- array_prev 
+    clim_seas <- array_clim
+    ref_seas <- array_obs
+  } else if (temporalite=="multi") {
+    if (agreg=="sum"){
+      prev_seas <- apply(array_prev[,,,temp], c(1,2,3), sum) 
+      clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum) 
+      ref_seas <- apply(array_obs[,,temp], c(1,2), sum)
+    } else if (agreg=="mean"){
+      prev_seas <- apply(array_prev[,,,temp], c(1,2,3), mean) 
+      clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum) 
+      ref_seas <- apply(array_obs[,,temp], c(1,2), mean)
+    }
+  }
+    
+   # computing ensemble mean
+    prev_seas <- apply(prev_seas, c(1,2), mean)
+    clim_seas <- apply(clim_seas, c(1,2), mean)
+    ano_ps_ensmean <- apply(prev_anomaly, c(1,2), mean)
+    ano_clim_ensmean <- apply(clim_anomaly, c(1,2), mean)
+      
     # computing mean of weighted values
-    array_score <- apply(array(unlist(val_prevseas) , c(3,ngrids)), 1, sum, na.rm = T)
-    det_boot[b,1] <- array_score[1]/sum(coeff_acc, na.rm = T) # ACC
-    det_boot[b,2] <- array_score[2]/sum(coeff_rmsps, na.rm = T) # RMSE prevision
-    det_boot[b,3] <- array_score[3]/sum(coeff_rmsclim, na.rm = T) # RMSE climato
+    det_boot[b,1] <-  ACC_boite(ano_ps_ensmean, obs_anomaly, lat)# ACC prevision
+    det_boot[b,2] <-  ACC_boite(ano_clim_ensmean, obs_anomaly, lat)# ACC climato
+    det_boot[b,3] <-  RMSE_boite(prev_seas, ref_seas, lat)# RMSE prevision
+    det_boot[b,4] <-  RMSE_boite(clim_seas, ref_seas, lat)# RMSE climato
   }
     # naming and saving files
       # list of bootstrapped values (for statistical tests)

@@ -63,7 +63,7 @@ nan <- length(an) # number of years
 
 ## Loading files
 
-We load values extracted in "extraction" and compute their cross validated anomalies, for reference and ps only
+We load values extracted in "extraction" and compute their cross validated anomalies
 
 ```{r, echo=FALSE}
 
@@ -85,9 +85,11 @@ foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # for-loop parallelized
   # loading reference and ps data
   nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
   nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
+  nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
 
   load(file = file.path(dir_data, "extract", nom_ref))
   load(file = file.path(dir_data, "extract", nom_prev))
+  load(file = file.path(dir_data, "extract", nom_clim))
 
   ngrids <- dim(array_obs)[1] # trick to automatically get number of grids
 
@@ -96,13 +98,16 @@ foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # for-loop parallelized
   
   if (temporalite=="single"){ # in that case we keep original data
   prev_seas <- array_prev 
+  clim_seas <- array_clim 
   ref_seas <- array_obs
   } else if (temporalite=="multi") { # in that case we aggregate using pre defined function specific to each variable
     if (agreg=="sum"){
     prev_seas <- apply(array_prev[,,,temp], c(1,2,3), sum) 
+    clim_seas <- apply(array_clim[,,,temp], c(1,2,3), sum) 
     ref_seas <- apply(array_obs[,,temp], c(1,2), sum)
     } else if (agreg=="mean"){
     prev_seas <- apply(array_prev[,,,temp], c(1,2,3), mean) 
+    clim_seas <- apply(array_clim[,,,temp], c(1,2,3), mean) 
     ref_seas <- apply(array_obs[,,temp], c(1,2), mean)
     }
     
@@ -110,23 +115,28 @@ foreach(b=1:nboot, .packages="tidyverse") %dopar%  { # for-loop parallelized
   
   # setting up arrays for data to be stored in
   prev_anomaly <- array(NA,dim=c(ngrids,nan,nrun))
+  clim_anomaly <- array(NA,dim=c(ngrids,nan,nrun))
   obs_anomaly <- array(NA,dim=c(ngrids,nan))
 
   for (y in 1:nan){ # each year we compute crossed mean (excluding ongoing year) and compute the difference with ongoing year value
     cv_mean_prev <- apply(prev_seas[,-y,], c(1,3), mean)
+    cv_mean_clim <- apply(clim_seas[,-y,], c(1,3), mean)
     cv_mean_obs <- apply(ref_seas[,-y], 1, mean)
 
     prev_anomaly[,y,] <- prev_seas[,y,]-cv_mean_prev
+    clim_anomaly[,y,] <- clim_seas[,y,]-cv_mean_clim
     obs_anomaly[,y] <- ref_seas[,y]-cv_mean_obs
     
   }
   
   # file naming 
   nom_prev <- paste0(indicateur,b,"_anomaly_prev_uerra5.RData")
+  nom_clim <- paste0(indicateur,b,"_anomaly_clim_uerra5.RData")
   nom_obs <- paste0(indicateur,b,"_anomaly_obs_uerra5.RData")
   
   # file saving 
   save(prev_anomaly, file = file.path(dir_data, "extract", nom_prev))
+  save(clim_anomaly, file = file.path(dir_data, "extract", nom_clim))
   save(obs_anomaly, file = file.path(dir_data, "extract", nom_obs))
   
 }
