@@ -11,13 +11,14 @@ Array dimension:
 
 ```{r setup, include=FALSE, echo=FALSE}
 
-library(plyr)
 library(dplyr)
+library(plyr)
 library(tidyverse)
 library(foreach)
 library(iterators)
 library(parallel)
 library(doParallel)
+library(tictoc)
 
 
 ```
@@ -28,23 +29,28 @@ To be set by user
 
 ```{r }
 
-# selected project and directories
-selected_project <- "stics" # stics or season or tree
-dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+                                               ###### PARAMETERS ######
+
+# selecting project
+selected_project <- "tree" # stics or season or tree
+# directories and cores
+setup(project = selected_project, no_cores = 6)
+
+# number of cores
+no_core <- 6
+
+                                               ###### METADATA ######
 
 # number of bootstrap iterations
 nboot <- 100
 save(nboot, file = file.path(dir_data, "extract", "nboot.RData"))
 
-# number of cores
-no_core <- 6
 
 # variables and time scales: always modify all at once
 if (selected_project=="stics"){
   indicateurs <- c("drainall", "etall", "yieldwheat", "yieldgrass")
   time_scale <- c("multi", "multi", "single", "single") #wether there is a time dimension or not
-  temp <- 9:20 # time window selected, in case of "multi"
+  temp <- 9:20 # time window selected, in case of "multi, scale is fortnight here (9:20 --> may - october)
   agreg_type <- c("sum","sum","none", "none","none") # type of aggregation over time dimension in case of "multi"
 
 }else if (selected_project=="season"){
@@ -145,12 +151,11 @@ Prevision/climatology arrays have 4 dimensions: grid+year+run+time
 ```{r, echo=FALSE}
 
 # generating random year series: should be generated once because it hase to remain the same through all codes
-
-# rand_year <- list()
+#rand_year <- list()
 # for (b in 1:nboot){
-#    rand_year[[b]] <- sample(1:nan, nan, replace = TRUE) 
+#    rand_year[[b]] <- sample(an, nan, replace = TRUE) # attention version Elisa ne generait pas les n° d'année
 #  }
-#  save(rand_year, file = file.path(dir_data, "extract", "rand_years.RData"))
+#  save(rand_year, file = file.path(dir_data, "extract",  "rand_years.RData"))
 
 load(file = file.path(dir_data, "extract", "rand_years.RData")) # loading list of bootstrapped years 
 

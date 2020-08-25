@@ -4,6 +4,7 @@ output: html_document
 ---
 The code aims at creating 2 types of plot for data visualisation
 It requires data extracted by "extraction"
+########## ADD LEGENDS !!!!!!!!!!!!!!!!!! ########################
 
 ```{r setup, include=FALSE}
 
@@ -28,23 +29,20 @@ Some are set here and can therefore be modified by user
                                      ### SELECTED PARAMETERS (to be set by user) ###
 
 
-# selected project and directories
-selected_project <- "tree" # stics or season or tree
-dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+# selecting project
+selected_project <- "stics" # stics or season or tree
+# directories and cores
+setup(project = selected_project, no_cores = 6)
 
 # selecting variable of interest
 load(file = file.path(dir_data, "extract", "indicateurs.RData"))
-indicateur <- indicateurs[3]
+indicateur <- indicateurs[4] 
 
 # selecting grid of interest (for second plot)
-maille <- 4
-
-# naming time integration - depends on time_windows (for plot titles)
-scale <- " MJJASO"
+maille <- 10
 
 
-                                      ### LOADED PARAMETERS (permanent) ###
+                                      ### METADATA ###
 
 
 # loading number of bootstrap interations
@@ -192,7 +190,7 @@ ref_gridmean <- apply(ref_original, 2, mean)
 
 ```
 
-## Nuage de points
+## BOXPLOT AND PROB SERIES
 
 Attention sum ou mean selon indicateur!
 
@@ -210,20 +208,21 @@ for (y in 1:nan){
 
 df_raw$year <- as.factor(df_raw$year)
 
+
 # plotting with ggplot2
 
-ggplot() + geom_boxplot(df_raw %>% filter(type=="prevision"), mapping=aes(x=year, y=value), color="#dd1c77", show.legend = TRUE)+
+p1<-ggplot() + geom_boxplot(df_raw %>% filter(type=="prevision"), mapping=aes(x=year, y=value), color="#dd1c77", show.legend = TRUE)+
   geom_point(df_raw %>% filter(type=="ref"), mapping=aes(x=year, y=value), color="#2ca25f")+
   #scale_colour_manual(name="Error Bars",values=cols) + scale_fill_manual(name="Bar",values=cols)
   labs(title = paste0(indicateur, scale, " spatial means"), x="Year", y= "Value")+
       theme_bw()+
        scale_x_discrete(breaks = scales::pretty_breaks(n = 12))
 
-```
+#```
 
 ## Plot ensemble mean and spread vs observation
 
-```{r }
+#```{r }
 
 
 df_psmean <- data.frame() # table with: type - year - value(ensemble mean)
@@ -247,18 +246,26 @@ ter3_ps <- as.numeric(quantile(ps_original[maille,,], probs = 2/3))
 
 # plot with ggplot2
 p <- ggplot(df_quant, aes(x=year, y=value)) + 
-  labs(title = paste0(indicateur, scale, " grid ", maille), x="Year", y= "Value")+
+  labs(title = paste0(indicateur, " MJJASO grid ", maille), x="Year", y= "Value")+
       theme_bw()+
        scale_x_continuous(breaks = scales::pretty_breaks(n = 12))
 
+
 ## with geom_fan extra
-p + geom_fan(data=df_quant, intervals=c(1,0.1), show.legend = FALSE) + 
+p2<- p+geom_fan(data=df_quant, intervals=c(1,0.1), show.legend = FALSE) + 
   geom_line(data=df_ref, mapping=aes(x=year,y=value), color="#a1d99b", size=1, show.legend = TRUE) +
   geom_hline(yintercept=ter1_ref, linetype="dashed", color = "#a1d99b", size=0.4) +
   geom_hline(yintercept=ter3_ref, linetype="dashed", color = "#a1d99b", size=0.4) +
   geom_line(data=df_psmean, mapping=aes(x=year,y=value), color="#f03b20", size=1) +
   geom_hline(yintercept=ter1_ps, linetype="dashed", color = "#f03b20", size=0.4) +
   geom_hline(yintercept=ter3_ps, linetype="dashed", color = "#f03b20", size=0.4)
+
+pdf(paste0(dir_plot,"/explo_",indicateur,scalename(selected_project,temporalite,agreg),"ps.pdf"))
+par(mfrow=c(1,2))
+print(p1)
+print(p2)
+dev.off()
+
 
 
 ```

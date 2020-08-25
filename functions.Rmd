@@ -4,18 +4,18 @@ output: html_document
 ---
 This code sets up manual functions used in other codes of the project. It needs to be run once for functions to be used in other codes
 
-```{r setup, include=FALSE}
+```{r }
 
 library(dplyr)
 library(stats)
 
 ```
 
-## AREA UNDER ROC aggregated at box level
+## ROC aggregated at box level
 
 Computing Area Under Curve for the whole box, weighting points as function of latitude
 
-```{r setup, include=FALSE}
+```{r }
 
 score_boite_prob = function(prev_prob, obs_bin, lati, nb_bin, e)
 {
@@ -73,7 +73,7 @@ score_boite_prob = function(prev_prob, obs_bin, lati, nb_bin, e)
 
 Computing Brier score for the whole box, weighting points as function of latitude
 
-```{r setup, include=FALSE}
+```{r }
 
 brier_score_boite = function(prev_prob, obs_bin, lati, e){
   
@@ -95,7 +95,6 @@ brier_score_boite = function(prev_prob, obs_bin, lati, e){
   bs=somme/(sum(24*coeff_lat, na.rm = TRUE))
   return(bs)
 }
-
 ```
 
 
@@ -103,7 +102,7 @@ brier_score_boite = function(prev_prob, obs_bin, lati, e){
 
 Computing ACC for the whole box, weighting points as function of latitude
 
-```{r setup, include=FALSE}
+```{r }
 
 ACC_boite = function(anomaly_prev, anomaly_obs, lati){
   
@@ -121,14 +120,11 @@ ACC_boite = function(anomaly_prev, anomaly_obs, lati){
      numerateur=numerateur+int1
      denominateur=denominateur+int2
     }
-
    }
   
   acc=numerateur/denominateur
   return(acc)
 }
-
-
 ```
 
 
@@ -136,7 +132,7 @@ ACC_boite = function(anomaly_prev, anomaly_obs, lati){
 
 Computing ACC for the whole box, weighting points as function of latitude
 
-```{r setup, include=FALSE}
+```{r }
 
 RMSE_boite = function(prev, obs, lati){
   
@@ -161,4 +157,64 @@ RMSE_boite = function(prev, obs, lati){
 
 ```
 
+## PATH SETUP
 
+```{r }
+
+setup = function(project, no_cores){
+  
+dir_data <<- paste0("D:/HOME/ekamir/scoring_medscope/data/",project) 
+dir_plot <<- paste0("D:/HOME/ekamir/scoring_medscope/figure/",project) 
+dir_scores <<- paste0("D:/HOME/ekamir/scoring_medscope/score/",project) 
+no_core <<- no_cores
+print(paste0("dir_data = ",dir_data))
+print(paste0("dir_plot = ",dir_plot))
+print(paste0("dir_scores = ",dir_scores))
+print(paste0("no_core = ",no_core))
+ 
+}
+
+```
+
+## SCALE name
+
+```{r }
+
+scalename = function(project, temporal, timewindow){
+  
+if(temporal=="single"){
+  scale_name <<- paste0("_",temporal,"_")
+} else if(temporal=="multi"){
+  scale_name <<- paste0("_",temporalite,"-",temp[1],"-",temp[length(temp)],"_")
+}
+  return(scale_name)
+}
+
+```
+
+## Bootstrapping years
+
+Create list of bootstrapped years from original set input. DONT RUN IT AGAIN DURING PROCESS !!
+
+```{r }
+
+selected_project <- "stics" # stics or season or tree
+setup(selected_project, no_cores = 6)
+
+gen_boot = function(nboot,an){
+  
+# nboot = number of bootstrap samples
+# an = vector of years from original data set
+# generating random year series: should be generated once because it has to remain the same through all codes
+  
+rand_year <- list()
+nan=length(an)
+ for (b in 1:nboot){
+    rand_year[[b]] <- sample(an, nan, replace = TRUE) 
+  }
+  save(rand_year, file = file.path(dir_data, "extract",  "rand_years.RData")) 
+
+}
+
+
+```

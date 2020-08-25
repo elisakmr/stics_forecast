@@ -26,22 +26,21 @@ Some are set here and can therefore be modified by user
 
                                      ### SELECTED PARAMETERS (to be set by user) ###
 
-# selected project and directories
-selected_project <- "stics" # stics or season or tree
-dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+# selecting project
+selected_project <- "season" # stics or season or tree
+# directories and cores
+setup(project = selected_project, no_cores = 6)
 
-# number of cores
-no_core <- 6
 
-# chosen quantile
+
+# chosen quantile (a completer avec d'autres quantiles si necesaire)
 kantile <- "ter" # ter or quint
 if (kantile=="quint"){
   proba = 1:4/5; events = 5
 } else { proba = 1:2/3; events = 3}
 
 
-                                      ### LOADED PARAMETERS (permanent) ###
+                                      ### METADATA ###
 
 
 # loading number of bootstrap interations
@@ -77,7 +76,7 @@ tictoc::tic() # timer on
 load(file = file.path(dir_data, "extract", "years.RData")) # list of years in each bootstrap iteration
 
 for (indicateur in indicateurs){
-  
+
   d <- which(indicateurs==indicateur)
   temporalite <- time_scale[d] # select corresponding time dimension: single or multi
   agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
@@ -121,16 +120,16 @@ foreach(b=1:nboot, .packages = 'easyVerification') %dopar%  { # for-loop paralle
   
   # using for-loop on grids, probabilistic values are derived using two nested functions from EasyVerification
   for (i in 1:ngrids){
-    bin_ref[i,,] <- count2prob(convert2prob(int_obs[i,], prob = proba), type = 4)
+    bin_ref[i,,] <- count2prob(convert2prob(int_obs[i,], prob = proba), type = 4) #type is a parameter used in proba convertion (4-->prob=n/TotN where n is ththe number of membe fullfilling criteria and  tot N = nb of members)
     prob_ps[i,,] <- count2prob(convert2prob(int_prev[i,,], prob = proba), type = 4)
     prob_clim[i,,] <- count2prob(convert2prob(int_clim[i,,], prob = proba), type = 4)
   }
   
   # naming and saving files
-  nom_prev <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")
-  nom_clim <- paste0(indicateur,b,"climprob_uerra5",kantile, ".RData")
-  nom_ref <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
-    
+  nom_prev <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"psprob",kantile, ".RData")
+  nom_clim <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"climprob",kantile, ".RData")
+  nom_ref <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"refbin",kantile, ".RData")
+
   save(prob_ps, file = file.path(dir_data, "extract", nom_prev))
   save(prob_clim, file = file.path(dir_data, "extract", nom_clim))
   save(bin_ref, file = file.path(dir_data, "extract", nom_ref))

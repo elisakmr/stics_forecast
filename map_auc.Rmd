@@ -35,22 +35,25 @@ Some are set here and can therefore be modified by user
 
                                      ### SELECTED PARAMETERS (to be set by user) ###
 
-# selected project and directories
+# selecting project
 selected_project <- "season" # stics or season or tree
-dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
+# directories and cores
+setup(project = selected_project, no_cores = 6)
 
 # selecting variable of interest
 load(file = file.path(dir_data, "extract", "indicateurs.RData"))
-indicateur <- indicateurs[3]
+nindicateur=5
+indicateur <- indicateurs[nindicateur]
+
+# selecting scores from climato or ps
+climat_select <- "ps" # ps or clim
+climat_vect <- c("ps","clim")
+index_clima <- which(climat_vect==climat_select)
 
 # chosen quantile
-quant <- 2 # 1 = low , 2 = upper : drain low, et high, yield high+low
+quant <- 0 # 0 = low , 2 = upper 
+extremes <- "first" # "first" if low; "last" otherwise
 kantile <- "ter" # ter or quint
-extremes <- c("first", "last","first", "last")
-
-# time integration
-scale <- " MJJASO"
 
 # score value interval: to be modified, especially if all grids are black, it means they're out of range
 auc_limits <- c(0,1)
@@ -64,8 +67,12 @@ score_palette <- c("#ca0020", "#f4a582", "#f7f7f7", "#92c5de", "#0571b0")
 # !! DO NOT MODIFY !! one color palette for signifiance plotting  
 sign_palette <- c("black", "black")
 
-                                      ### LOADED PARAMETERS (permanent) ###
+                                      ### METADATA ###
 
+# loading time scales and agregation type
+load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
+load(file = file.path(dir_data, "extract", "time_window.RData")) # if yes which window is selected
+load(file = file.path(dir_data, "extract", "agregation.RData")) # if yes what type of aggregation should be applied
 
 # trick to get automatically number of grids 
 nom_ref <- paste0(indicateur,1,"_ref_uerra5.RData")
@@ -80,14 +87,11 @@ if (selected_project=="season"|selected_project=="tree"){
 }
 
 # background map
-key = "AIzaSyCD2-pP0yfM8aC8sjCB4g--CaCcExP6NhU"; "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA"
-register_google(key = "AIzaSyB24WUzCzX1lErLgsVLtio1c7QxLfw1_SA")
 if (selected_project=="season"|selected_project=="tree"){
-    back_map <- get_map(location = c(1.2, 41, 10, 46), maptype = "satellite", source = "google") 
+    back_map <- get_map(location = c(1.2, 41, 10, 46), maptype = "satellite", source = "osm") 
 } else if (selected_project=="stics"){
-    back_map <- get_map(location = c(4, 43.1, 5.7, 44), maptype = "satellite", source = "google") 
+    back_map <- get_map(location = c(4, 43.1, 5.7, 44), maptype = "satellite", source = "osm") 
 }
-
 
 ```
 
@@ -98,17 +102,23 @@ Significance is computed using Wilcoxon's test (H0: mean AUC value not above 0.5
 
 ```{r }
 
+for (indicateur in indicateurs){
+
                 # BUIDLING SHAPEFILE OF MEAN AUC VALUES AND THEIR SIGNIFICANCE #
+
+d <- which(indicateurs==indicateur)
+temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
 
   ## extracting bootstrapped auc values
 # setting up arrays for all bootstrapped scores to be stored in
-score_boot <- array(NA, dim=c(ngrids, 6, nboot)) 
+score_boot <- array(NA, dim=c(ngrids, 10, nboot)) 
 
 # loading data and filling up the array just set
   for (b in 1:nboot)  { 
   
-    nom_prev <- paste0(indicateur, b, "_", kantile, "aucgrid_uerra5.RData")
-    load(file = file.path(dir_data, "score", nom_prev))
+    nom_scoreroc <- paste0(indicateur,"_", b, scalename(selected_project,temporalite,agreg), kantile, "aucgrid.RData")
+    load(file = file.path(dir_scores, nom_scoreroc))
 
     score_boot[,,b] <- scoreprob[,]
 
@@ -128,13 +138,14 @@ matrix4shp[,4] <- lon
     # mean skill and wilcoxon test outcome
 
 matrix4shp[,2] <- rep(0, ngrids) # signficance: 0 everywhere first, will switch to 1 if positive statistical test outcome
-matrix4shp[,1] <- apply(score_boot[,quant,], 1, mean, na.rm = TRUE) #  mean of bootstrapped auc  
+matrix4shp[,1] <- apply(score_boot[,quant+index_clima,], 1, mean, na.rm = TRUE) #  mean of bootstrapped auc  
 
     # Wilcoxon test
 
+
 for (i in 1:ngrids)  { 
-    if (length(which(is.na(score_boot[i,quant,]))) >= na_limit) {matrix4shp[i,2] <- 0; matrix4shp[i,1] <- NA}
-    else { wilauc <- wilcox.test(score_boot[i,quant,], mu = 0.5, alternative = "greater", conf.level = 0.95) # h0 represented by "mu = 0.5" & "alternative = greater", alternative being h1
+    if (length(which(is.na(score_boot[i,quant+index_clima,]))) >= na_limit) {matrix4shp[i,2] <- 0; matrix4shp[i,1] <- NA}
+    else { wilauc <- wilcox.test(score_boot[i,quant+index_clima,], mu = 0.5, alternative = "greater", conf.level = 0.95) # h0 represented by "mu = 0.5" & "alternative = greater", alternative being h1
 
       if (wilauc$p.value < 0.05) { # p value de 5%
       matrix4shp[i,2] <- 1 # 1 = test validé, 0 = non validé (voir plus haut)
@@ -152,8 +163,9 @@ shp_grid$significance[which(shp_grid$significance==0)] <- NA # to help plotting,
 
 
                                       # MAPPING WITH GGPLOT2 #
+pdf(paste0(dir_plot,"/auc_",extremes,kantile,"_",indicateur,scalename(selected_project,temporalite,agreg),climat_select,".pdf"))
 
-ggmap(back_map) +
+p<- ggmap(back_map) +
 geom_sf(data = shp_grid, aes(color = auc), size=grid_size, shape = 15) + 
   scale_color_gradientn(colours=score_palette, limits = auc_limits, na.value = "black", guide = guide_colorbar(barwidth = 10, barheight = 0.25, nbin = 5)) +
 new_scale("color")+
@@ -161,6 +173,11 @@ geom_sf(data = shp_grid, aes(color = significance), shape = 3, size = 0.15, show
   scale_color_gradientn(colours=sign_palette, na.value = "transparent")+
 theme(legend.direction = "horizontal", legend.position = "right", legend.title = element_text(), legend.text=element_text(size=6),  
       plot.title = element_text(size = 12, hjust = 0, vjust = 1.5)) + 
-  labs(title = paste0(indicateur," AUC ", extremes[quant], " ", kantile, scale))
+  labs(title = paste0(indicateur, scalename(selected_project,temporalite,agreg), extremes, "_", kantile,"_AUC_", climat_select))
+print(p)
+
+dev.off()
+
+}
 
 ```

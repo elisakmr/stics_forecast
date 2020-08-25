@@ -32,13 +32,10 @@ Some are set here and can therefore be modified by user
 
                                      ### SELECTED PARAMETERS (to be set by user) ###
 
-# selected project and directories
-selected_project <- "stics" # stics or season or tree
-dir_data <- paste0("D:/HOME/ekamir/scoring_medscope/data/",selected_project) 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
-
-# number of cores
-no_core <- 6
+# selecting project
+selected_project <- "season" # stics or season or tree
+# directories and cores
+setup(project = selected_project, no_cores = 6)
 
 # chosen quantile
 kantile <- "ter" # ter or quint
@@ -47,13 +44,13 @@ if (kantile=="quint"){
 } else { proba = 1:2/3; events = 3}
 
 
-                                      ### LOADED PARAMETERS (permanent) ###
+                                      ### METADATA ###
 
 
 # loading number of bootstrap interations
 load(file = file.path(dir_data, "extract", "nboot.RData"))
 
-# loading variables
+# loading variables♣¥
 load(file = file.path(dir_data, "extract", "indicateurs.RData"))
 # loading time scales and agregation type
 load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
@@ -71,26 +68,28 @@ load(file = file.path(dir_data, "extract", "years.RData"))
 nan <- length(an) # number of years
 
 
-
 ```
                                             
 ## Gridded scores
 
 Scores computed for each grid separately.
 They are stored in an array, in the following order(on the 2nd dimension):
-1: roc quant1
-2: roc last quant
-3: brier quant1
-4: brier ss quant1
-5: brier last quant
-6: brier ss last quant
+1: roc quant1 ps
+2: roc quant1 clim
+3: roc last quant ps
+4: roc last quant clim
+5: brier quant1 ps
+6: brier quant1 clim
+7: brier last quant ps
+8: brier last quant clim
+9: brier ss quant1 (ps vs clim)
+10: brier ss last quant (ps vs clim)
 
 ```{r}
 
 tictoc::tic() # start timer
-
 for (indicateur in indicateurs){
-  
+
   d <- which(indicateurs==indicateur)
   temporalite <- time_scale[d] # select corresponding time dimension: single or multi
   agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
@@ -103,19 +102,20 @@ foreach(b=1:nboot, .packages = c('easyVerification', 's2dverification'), .combin
   # loading "raw" and probabilistic data
   nom_ref <- paste0(indicateur,b,"_ref_uerra5.RData")
   nom_prev <- paste0(indicateur,b,"_prev_uerra5.RData")
-  nom_prev_prob <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")    
-  nom_clim_prob <- paste0(indicateur,b,"climprob_uerra5",kantile, ".RData")    
-  nom_ref_bin <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
-  
+  nom_clim <- paste0(indicateur,b,"_clim_uerra5.RData")
+  nom_prev_prob <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"psprob",kantile, ".RData")
+  nom_clim_prob <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"climprob",kantile, ".RData")
+  nom_ref_bin <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"refbin",kantile, ".RData")
+ 
   load(file = file.path(dir_data, "extract", nom_prev))
+  load(file = file.path(dir_data, "extract", nom_clim))
   load(file = file.path(dir_data, "extract", nom_ref))
   load(file = file.path(dir_data, "extract", nom_prev_prob))
   load(file = file.path(dir_data, "extract", nom_clim_prob))
   load(file = file.path(dir_data, "extract", nom_ref_bin))
   
-  
   ngrids <- dim(array_obs)[1] # nomber of grids
-  scoreprob <- array (NA, dim=c(ngrids,6)) # array for scores to be stored in
+  scoreprob <- array (NA, dim=c(ngrids,10)) # array for scores to be stored in
   rapport_climps1 <- vector()
   rapport_climps2 <- vector()
   
@@ -123,46 +123,57 @@ foreach(b=1:nboot, .packages = c('easyVerification', 's2dverification'), .combin
   if (temporalite=="single"){
     seas_obs <- array_obs
     seas_prev <- array_prev
+    seas_clim <- array_clim
   } else if (temporalite=="multi") {
     seas_obs <- array()
     seas_prev <- array()
+    seas_clim <- array()
     if (agreg=="sum"){
     seas_prev <- apply(array_prev[,,,temp], c(1,2,3), sum) 
+    seas_clim <- apply(array_clim[,,,temp], c(1,2,3), sum) 
     seas_obs <- apply(array_obs[,,temp], c(1,2), sum)
     } else if (agreg=="mean"){
     seas_prev <- apply(array_prev[,,,temp], c(1,2,3), mean) 
+    seas_clim <- apply(array_clim[,,,temp], c(1,2,3), mean) 
     seas_obs <- apply(array_obs[,,temp], c(1,2), mean)
     }
   }
   
   # Area Under Curve
   scoreprob[,1] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat1 
+  scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_clim, obs=seas_obs, prob=proba, parallel = TRUE)$cat1 
   
   # regardin selected quantile, index of the upper one change (5 for quintile, 3 for tercile) 
   if (kantile=="quint"){
-    scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat5
-  } else { scoreprob[,2] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat3 }
+    scoreprob[,3] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat5
+    scoreprob[,4] <- veriApply("EnsRoca", fcst=seas_clim, obs=seas_obs, prob=proba, parallel = TRUE)$cat5
+  } else { 
+    scoreprob[,3] <- veriApply("EnsRoca", fcst=seas_prev, obs=seas_obs, prob=proba, parallel = TRUE)$cat3 
+    scoreprob[,4] <- veriApply("EnsRoca", fcst=seas_clim, obs=seas_obs, prob=proba, parallel = TRUE)$cat3 
+    }
 
   # loop needed for Brierscore function, as veriapply doesn't work on parallelized loop
   for (i in 1:ngrids){
     # Brier score
-  scoreprob[i,3] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs
+  scoreprob[i,5] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs
+  scoreprob[i,6] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_clim[i,,1])))$bs
     # intermediate for Brier skill score
   rapport_climps1[i] <- BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_ps[i,,1])))$bs/BrierScore(as.matrix(t(bin_ref[i,,1])), as.matrix(t(prob_clim[i,,1])))$bs
   
     # Brier score
-  scoreprob[i,5] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs
+  scoreprob[i,7] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs
+  scoreprob[i,8] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_clim[i,,events])))$bs
     # intermediate for Brier skill score
   rapport_climps2[i] <- BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_ps[i,,events])))$bs/BrierScore(as.matrix(t(bin_ref[i,,events])), as.matrix(t(prob_clim[i,,events])))$bs
   
   }
   # Brier skill score
-  scoreprob[,4] <- 1-rapport_climps1
-  scoreprob[,6] <- 1-rapport_climps2
+  scoreprob[,9] <- 1-rapport_climps1
+  scoreprob[,10] <- 1-rapport_climps2
   # naming file
-  nom_scoreroc <- paste0(indicateur, b, "_", kantile, "aucgrid_uerra5.RData")
+  nom_scoreroc <- paste0(indicateur,"_", b, scalename(selected_project,temporalite,agreg), kantile, "aucgrid.RData")
   # naming file
-  save(scoreprob, file = file.path(dir_data, "score", nom_scoreroc))
+  save(scoreprob, file = file.path(dir_scores, nom_scoreroc))
 
   }
   
@@ -186,8 +197,14 @@ tictoc::tic() # timer on
 
 for (indicateur in indicateurs){
 
-  auc_boot <- list()
-  brier_boot <- list()
+  d <- which(indicateurs==indicateur)
+  temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+  agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
+  
+  auc_boot_ps <- list()
+  auc_boot_clim <- list()
+  brier_boot_ps <- list()
+  brier_boot_clim <- list()
   
   load(file = file.path(dir_data, "extract", paste0(indicateur, "_lat.RData")))
   ngrids <- length(lat)
@@ -195,31 +212,46 @@ for (indicateur in indicateurs){
   for (b in 1:nboot){ 
     
     # loading probabilistic data
-    nom_prev <- paste0(indicateur,b,"psprob_uerra5",kantile, ".RData")    
-    nom_ref <- paste0(indicateur,b,"refbin_uerra5",kantile, ".RData")
-    load(file = file.path(dir_data, "extract", nom_prev))
-    load(file = file.path(dir_data, "extract", nom_ref))
+  nom_prev_prob <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"psprob",kantile, ".RData")
+  nom_clim_prob <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"climprob",kantile, ".RData")
+  nom_ref_bin <- paste0(indicateur,"_",b,scalename(selected_project,temporalite,agreg),"refbin",kantile, ".RData")
+ 
+    load(file = file.path(dir_data, "extract", nom_prev_prob))
+    load(file = file.path(dir_data, "extract", nom_clim_prob))
+    load(file = file.path(dir_data, "extract", nom_ref_bin))
     
-    int_auc <- vector()
-    int_brier <- vector()
+    int_auc_ps <- vector()
+    int_auc_clim <- vector()
+    int_brier_ps <- vector()
+    int_brier_clim <- vector()
     for (e in c(1:events)){ # events are different quantiles
       
-      int_auc[e] <- score_boite_prob(prob_ps, bin_ref, lat, nb_bin = 10, e)$AUC # auc 
-      int_brier[e] <- brier_score_boite(prob_ps, bin_ref, lat, e) # brier  
+      int_auc_ps[e] <- score_boite_prob(prob_ps, bin_ref, lat, nb_bin = 10, e)$AUC # auc 
+      int_auc_clim[e] <- score_boite_prob(prob_clim, bin_ref, lat, nb_bin = 10, e)$AUC # auc 
+      int_brier_ps[e] <- brier_score_boite(prob_ps, bin_ref, lat, e) # brier  
+      int_brier_clim[e] <- brier_score_boite(prob_clim, bin_ref, lat, e) # brier  
   
       }
    # we save them in lists to keep all bootstrapped score
-   auc_boot[[b]] <- int_auc 
-   brier_boot[[b]] <- int_brier 
+   auc_boot_ps[[b]] <- int_auc_ps
+   auc_boot_clim[[b]] <- int_auc_clim
+   brier_boot_ps[[b]] <- int_brier_ps 
+   brier_boot_clim[[b]] <- int_brier_clim 
   
   }
+  
   #naming and saving auc list 
-  auc_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
-  save(auc_boot, file = file.path(dir_data, "score", auc_box))
+  auc_nom_ps <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "boxauc_ps.RData")
+  auc_nom_clim <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "boxauc_clim.RData")
+
+  save(auc_boot_ps, file = file.path(dir_scores, auc_nom_ps))
+  save(auc_boot_clim, file = file.path(dir_scores, auc_nom_clim))
 
   #naming and saving brier list 
-  brier_box <- paste0(indicateur, "_", kantile, "boxbrier_uerra5.RData")
-  save(brier_boot, file = file.path(dir_data, "score", brier_box))
+  brier_nom_ps <- paste0(indicateur,scalename(selected_project,temporalite,agreg), "_", kantile, "boxbrier_ps.RData")
+  brier_nom_clim <- paste0(indicateur,scalename(selected_project,temporalite,agreg), "_", kantile, "boxbrier_clim.RData")
+  save(brier_boot_ps, file = file.path(dir_scores, brier_nom_ps))
+  save(brier_boot_clim, file = file.path(dir_scores, brier_nom_clim))
   
 }
 
@@ -233,50 +265,58 @@ tictoc::toc() # timer off
 From lists generated before, we create and save a csv with bootstrapped score mean (for box score only)
 
 ```{r}
+df_auc_ps <- data.frame()
+df_auc_clim <- data.frame()
+df_brier_ps <- data.frame()
+df_brier_clim <- data.frame()
 
 for (indicateur in indicateurs){
+  
+  d <- which(indicateurs==indicateur)
+  temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+  agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
+
   # loading list files
-  nom_auc <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
-  load(file = file.path(dir_data, "score", nom_auc))
-  nom_brier <- paste0(indicateur, "_", kantile, "boxbrier_uerra5.RData")
-  load(file = file.path(dir_data, "score", nom_brier))
+  auc_nom_ps <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "boxauc_ps.RData")
+  load(file = file.path(dir_scores, auc_nom_ps))
+  auc_nom_clim <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "boxauc_clim.RData")
+  load(file = file.path(dir_scores, auc_nom_clim))
+  
+  brier_nom_ps <- paste0(indicateur,scalename(selected_project,temporalite,agreg), "_", kantile, "boxbrier_ps.RData")
+  load(file = file.path(dir_scores, brier_nom_ps))
+  brier_nom_clim <- paste0(indicateur,scalename(selected_project,temporalite,agreg), "_", kantile, "boxbrier_clim.RData")
+  load(file = file.path(dir_scores, brier_nom_clim))
   
   # averaging list
-  sum_aucbox <- apply(array(unlist(auc_boot) , c(events,nboot)), 1, mean, na.rm = T)
-  sum_brierbox <- apply(array(unlist(brier_boot) , c(events,nboot)), 1, mean, na.rm = T)
+  df_auc_ps <- array(unlist(auc_boot_ps) , c(events,nboot))
+  df_auc_clim <- array(unlist(auc_boot_clim) , c(events,nboot))
+  df_brier_ps <- array(unlist(brier_boot_ps) , c(events,nboot))
+  df_brier_clim <- array(unlist(brier_boot_clim) , c(events,nboot))
+
+  sum_aucbox_ps <- apply(df_auc_ps, 1, mean, na.rm = T)
+  sum_aucbox_clim <- apply(df_auc_clim, 1, mean, na.rm = T)
+  sum_brierbox_ps <- apply(df_brier_ps, 1, mean, na.rm = T)
+  sum_brierbox_clim <- apply(df_brier_clim, 1, mean, na.rm = T)
   
+  # statistical tests
+   sum_aucbox_ps[4:6] <- c(wilcox.test(df_auc_ps[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value, NA, wilcox.test(df_auc_ps[events,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value) # first and last quantile
+   sum_aucbox_clim[4:6] <- c(wilcox.test(df_auc_clim[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value, NA, wilcox.test(df_auc_clim[events,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value) # first and last quantile
+   sum_brierbox_ps[4:6] <- c(wilcox.test(df_brier_ps[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value, NA, wilcox.test(df_brier_ps[events,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value) # first and last quantile
+   sum_brierbox_clim[4:6] <- c(wilcox.test(df_brier_clim[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value, NA, wilcox.test(df_brier_clim[events,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value) # first and last quantile
+  
+
   # naming and saving files
-  nom_aucav <- paste0(indicateur, "_", kantile, "avboxauc_uerra5.csv")
-  write_csv(as.data.frame(sum_aucbox), file.path(dir_data, "score", nom_aucav))
-  nom_brierav <- paste0(indicateur, "_", kantile, "avboxbrier_uerra5.csv")
-  write_csv(as.data.frame(sum_aucbox), file.path(dir_data, "score", nom_brierav))
+  nom_aucav_ps <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "avboxauc_ps.csv")
+  write_csv(as.data.frame(sum_aucbox_ps), file.path(dir_scores, nom_aucav_ps))
+  nom_aucav_clim <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "avboxauc_clim.csv")
+  write_csv(as.data.frame(sum_aucbox_clim), file.path(dir_scores, nom_aucav_clim))
+
+  nom_brierav_ps <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "avboxbrier_ps.csv")
+  write_csv(as.data.frame(sum_brierbox_ps), file.path(dir_scores, nom_brierav_ps))
+  nom_brierav_clim <- paste0(indicateur,"_", scalename(selected_project,temporalite,agreg), kantile, "avboxbrier_clim.csv")
+  write_csv(as.data.frame(sum_brierbox_clim), file.path(dir_scores, nom_brierav_clim))
   
 }
 
 ```
 
-[ optional ]
-
-## Box score significance test
-
-Optional and manual: wilcoxon statistical tests
-Wilcoxon test with H0: AUC not above 0.5 / to be defined for Brier score
-
-```{r}
-indicateur <- "bilanhydr" # to be selected by user
-lastquant <- 3 # 3 if terciles, 5 if quintile
-
-  # loading list of box scores
-  nom_box <- paste0(indicateur, "_", kantile, "boxauc_uerra5.RData")
-  load(file = file.path(dir_data, "score", nom_box))
-  
-  boxboot <- array(unlist(auc_boot) , c(events,nboot))
-  
-  # testing 1st quantile
-  wil_first <- wilcox.test(boxboot[1,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
-  # testing last quantile
-  wil_last <- wilcox.test(boxboot[lastquant,], mu = 0.5, alternative = "greater", conf.level = 0.95, na.action = na.omit)$p.value
-
-  return(wil_first, wil_last)
-
-```

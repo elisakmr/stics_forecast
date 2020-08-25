@@ -8,15 +8,10 @@ output:
 
 ```{r setup, include=FALSE, echo=FALSE}
 
-dir_data <- "D:/HOME/ekamir/scoring_medscope/data/stics" 
-dir_plot <- "D:/HOME/ekamir/scoring_medscope/figure" 
-
 library(plyr)
 library(dplyr)
 library(tidyverse)
 library(stats)
-
-no_core <- 6
 
 ```
 
@@ -24,32 +19,37 @@ no_core <- 6
 
 ```{r }
 
-# bootstrap
+                                     ### SELECTED PARAMETERS (to be set by user) ###
+
+# selecting project
+selected_project <- "stics" # stics or season or tree
+# directories and cores
+setup(project = selected_project, no_cores = 6)
+# variable
+indicateur <- indicateurs[4]
+
+                                      ### LOADED PARAMETERS (permanent) ###
+
+
+# loading number of bootstrap interations
 load(file = file.path(dir_data, "extract", "nboot.RData"))
 
-
-# variables
+# loading variables
 load(file = file.path(dir_data, "extract", "indicateurs.RData"))
-load(file = file.path(dir_data, "extract", "temporalite.RData"))
-indicateur <- indicateurs[5]
-temporalite <- temporalite[5]
+# loading time scales and agregation type
+load(file = file.path(dir_data, "extract", "temporalite.RData")) # is there a time dimension
+load(file = file.path(dir_data, "extract", "time_window.RData")) # if yes which window is selected
+load(file = file.path(dir_data, "extract", "agregation.RData")) # if yes what type of aggregation should be applied
 
-# runs
-run <- seq(from=1, to=25, by=1)
-nrun <- length(run)
+ntemp <- length(temp) # number of elements in time dimension
 
-# temporal agregation
-temp <- 9:20 # length of agregation
-agreg_type <- sum # type of agregation
-ntemp <- length(temp)
+# loading ensemble members
+load(file = file.path(dir_data, "extract", "runs.RData"))
+nrun <- length(run) # number of members
 
-# automatic parameters
-nom_clim <- paste0(indicateur,1,"_clim_uerra5.RData")
-load(file = file.path(dir_data, "extract", nom_clim))
-ngrids <- dim(array_clim)[1]
-nan <- dim(array_clim)[2]
-nrun <- dim(array_clim)[3]
-an <- seq(1993,2016,1)
+# loading years
+load(file = file.path(dir_data, "extract", "years.RData"))
+nan <- length(an) # number of years
 
 ```
 
@@ -57,11 +57,17 @@ an <- seq(1993,2016,1)
 
 ```{r }
 
-### LOADING ###
+d <- which(indicateurs==indicateur)
+temporalite <- time_scale[d] # select corresponding time dimension: single or multi
+agreg <- agreg_type[d] # select corresponding time aggregation type: sum or mean
+
+nom_ref <- paste0(indicateur,1,"_ref_uerra5.RData")
+load(file = file.path(dir_data, "extract", nom_ref))
+ngrids <- dim(array_obs)[1] # trick to automatically get number of grids
 
 
                                             ### WITH TIME DIMENSION ###
-if (temporalite=="quinzaine"){
+if (temporalite=="multi"){
 
 clim_original <- array(NA, dim=c(ngrids, nan, nrun, ntemp))
 ref_original <- array(NA, dim=c(ngrids, nan, ntemp))
@@ -92,7 +98,7 @@ ref_original <- array(NA, dim=c(ngrids, nan, ntemp))
 
 
                                             ### WITHOUT TIME DIMENSION ###
-} else if (temporalite=="yearly"){
+} else if (temporalite=="single"){
 
 
 clim_original <- array(NA, dim=c(ngrids, nan, nrun))
@@ -127,24 +133,55 @@ ref_original <- array(NA, dim=c(ngrids, nan))
 ngrids <- dim(ref_original)[1]
 
 
-
-
 ### RESHAPING ###
 
-# we build a 3 columns data frame: grid, year, value
+# FOR ANOVA: we build a 3 columns data frame: grid, year, value
 
 df_out <- data.frame()
 
-for (mb in 1:nrun){
-  if (temporalite=="yearly"){
-    int <- as.data.frame(clim_original[,,mb])
-  }else if (temporalite=="monthly"){ 
-    int <- as.data.frame(apply(clim_original[,,mb,], c(1,2), agreg_type))}
+for (r in 1:nrun){
+  if (temporalite=="single"){
+    int <- as.data.frame(clim_original[,,r])
+  }else if (temporalite=="multi"){ 
+          if (agreg=="sum"){
+    int <- as.data.frame(apply(clim_original[,,r,], c(1,2), sum))
+    }else if (agreg=="mean"){
+    int <- as.data.frame(apply(clim_original[,,r,], c(1,2), sum)) }
+  }
     colnames(int) <- an
     int <- int %>% gather(an) %>% mutate(maille=rep(seq(1,ngrids,1), times=nan))
     df_out <- rbind(df_out, int)
 }
 
+# FOR SPECIFIC GRAPHS: time aggregation & ensemble mean
+#grid means are needed for boxplot; ensemble means are needed for the prob time series
+
+                                            ### WITH TIME DIMENSION ###
+if (temporalite=="multi"){
+      if (agreg=="sum"){
+      clim_agreg <- apply(clim_original[,,,], c(1,2,3), sum)
+      ref_agreg <- apply(ref_original[,,], c(1,2), sum)
+      } else if (agreg=="mean"){
+      clim_agreg <- apply(clim_original[,,,], c(1,2,3), mean)
+      ref_agreg <- apply(ref_original[,,], c(1,2), mean)
+      }
+      
+clim_gridmean <- apply(clim_agreg, c(2,3), mean)
+clim_ensmean <- apply(clim_agreg, c(1,2), mean)
+clim_original <- clim_agreg
+ref_gridmean <- apply(ref_agreg, 2, mean)
+ref_original <- ref_agreg
+
+
+
+                                            ### WITHOUT TIME DIMENSION ###
+} else if (temporalite=="single"){
+
+clim_gridmean <- apply(clim_original, c(2,3), mean)
+clim_ensmean <- apply(clim_original, c(1,2), mean)
+ref_gridmean <- apply(ref_original, 2, mean)
+
+}
 
 ```
 
@@ -152,14 +189,31 @@ for (mb in 1:nrun){
 
 ```{r }
 
-fit <- aov(data = df_out, formula = value ~ an + maille + an:maille)
-summary(fit)
+fit1 <- aov(data = df_out, formula = value ~ an + maille + an:maille)
+fit2 <- aov(data = df_out, formula = value ~ an )
+summary(fit1)
+summary(fit2)
+
+newfit <- lm(data = df_out, formula = value ~ factor(an))
+analyse <- anova(newfit)
+analyse
+
+```
+## Verification plots
+
+```{r }
+
+fit <- aov(data = df_out, formula= value ~ an+maille)
+plot(fit)
 
 ```
 
-## Exploration plots
+## Exploration plots: first overview
 
 ```{r }
+
+                                 ### log VALUE VS GRID BOXPLOT ###
+                                   
 
 par(mfrow=c(1,2))
 boxplot(log(value) ~ an, data=df_out, cex.lab=1.5, xlab="year",ylab="log(value)")
@@ -167,16 +221,17 @@ boxplot(log(value) ~ maille, data=df_out, cex.lab=1.5, xlab="maille",ylab="log(v
 # interactions: boxplot(log(value) ~ an*maille, data=df_out, cex.lab=1.5, xlab="combinaison annee et maille ",ylab="log(value)")
 
 
-with(df_out, {interaction.plot(x.factor = maille, trace.factor=an, response = value, type="l", fun=mean)},
-abline(h=mean(value[an==2002]),col="red"))
+
 ```
 
-## Verification plots
+## Exploration plots: zooming on year factor
 
 ```{r }
+                                        ### VALUE MEAN VS GRID, YEAR EFFECT ###
 
-fit <- aov(data = df_out, formula= value ~ an+maille)
-plot(fit)
+with(df_out, {interaction.plot(x.factor = maille, trace.factor=an, response = value, type="l", fun=mean)},
+abline(h=mean(value[an==2002]),col="red"))
+
 
 
 ```
